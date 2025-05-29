@@ -521,7 +521,8 @@ class MedicalTransApp(tb.Window):
             return c.fetchone() is not None
 
     def show_info_popup(self, title, message):
-        win = self.build_centered_popup(title, 500, 220)  # 🔄 تموضع في منتصف النافذة الرئيسية
+        win_width = 700 if title == "معلومة" else 500
+        win = self.build_centered_popup(title, win_width, 220)
 
         frame = tb.Frame(win)
         frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -550,10 +551,19 @@ class MedicalTransApp(tb.Window):
         if not hasattr(self, 'active_warnings'):
             self.active_warnings = []
 
+        column_keys = ("warning",)
+        column_labels = ["🚨 قائمة التحذيرات النشطة"]
+
+        # ✅ تحقق من عدد الأعمدة لتفادي القسمة على صفر
+        if len(column_labels) == 0:
+            self.show_info_popup("خطأ", "تعذر إنشاء جدول التنبيهات. لم يتم العثور على أعمدة كافية.")
+            return
+
         # نافذة تحتوي على جدول تحذيرات
-        win, tree, bottom_controls = self.build_centered_popup("⚠️ التنبيهات الحالية", 600, 400,
-            columns=("warning",),
-            column_labels=["🚨 قائمة التحذيرات النشطة"]
+        win, tree, bottom_controls = self.build_centered_popup(
+            "⚠️ التنبيهات الحالية", 600, 400,
+            columns=column_keys,
+            column_labels=column_labels
         )
 
         # تعبئة الجدول بالتحذيرات (أو تركه فارغًا إذا لا توجد)
@@ -566,12 +576,11 @@ class MedicalTransApp(tb.Window):
         self.apply_alternate_row_colors(tree)
 
         # ===== أزرار أسفل النافذة =====
-        # زر إغلاق
         ttk.Button(bottom_controls, text="❌ إغلاق", style="info.TButton", command=win.destroy)\
             .pack(side="left", padx=10, ipadx=15)
 
-        # زر "عرض المؤرشفة" مستقبلاً إن أردت تنفيذه
-        # ttk.Button(bottom_controls, text="📁 عرض المؤرشفة", style="info.TButton", command=...)\
+        # مستقبلًا:
+        # ttk.Button(bottom_controls, text="📁 عرض المؤرشفة", style="info.TButton", command=...)\ 
         #     .pack(side="left", padx=10, ipadx=15)
 
     def show_alert_popup(self):
@@ -806,19 +815,25 @@ class MedicalTransApp(tb.Window):
         os.startfile(temp_file.name)
 
     def configure_tree_columns(self, tree, column_labels):
-        total_columns = len(tree["columns"])
-        tree.update_idletasks()  # لتحديث عرض الجدول
-        tree_width = tree.winfo_width() if tree.winfo_width() > 0 else 1000
-        available_width = tree_width - 20  # خصم للحواف
-        default_col_width = int(available_width / (total_columns - 1))  # -1 لحذف id
+        total_columns = len(column_labels)
+        available_width = 540  # عرض تقريبي لتوزيع الأعمدة داخل النافذة
 
-        for col, label in zip(tree["columns"], column_labels):
-            if col == "id":
-                tree.heading(col, text="")
-                tree.column(col, width=0, stretch=False)
-            else:
-                tree.heading(col, text=label)
-                tree.column(col, anchor="center", width=default_col_width, stretch=True)
+        if total_columns == 0:
+            print("⚠️ لا توجد أعمدة لعرضها في الجدول.")
+            return
+        elif total_columns == 1:
+            # عمود واحد فقط، نخصص له العرض الكامل
+            tree.heading("#1", text=column_labels[0])
+            tree.column("#1", anchor="center", width=available_width)
+        else:
+            default_col_width = int(available_width / (total_columns - 1))  # -1 لحذف id
+            for i, label in enumerate(column_labels):
+                col_id = f"#{i + 1}"
+                tree.heading(col_id, text=label)
+                if i == 0:
+                    tree.column(col_id, width=30, anchor="center", stretch=False)  # id مخفي أو صغير
+                else:
+                    tree.column(col_id, width=default_col_width, anchor="center")
 
     def build_centered_popup(self, title, width, height, columns=None, column_labels=None, table_height=10):
         window = tb.Toplevel(self)
@@ -1140,6 +1155,14 @@ class MedicalTransApp(tb.Window):
                 driver_id, driver_name, plate_from = row
                 archived_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+                # ✅ أولاً: تحديث plate_to في جدول السائقين
+                c.execute("""
+                    UPDATE drivers
+                    SET plate_to = ?
+                    WHERE id = ?
+                """, (retire_date, driver_id))
+
+                # ✅ ثم أرشفة العلاقة
                 c.execute("""
                     INSERT INTO driver_car_assignments_archive (
                         driver_id, driver_name, assigned_plate,
@@ -1150,11 +1173,11 @@ class MedicalTransApp(tb.Window):
                     driver_name,
                     plate,
                     plate_from,
-                    retire_date,  # نستخدم تاريخ إخراج السيارة
+                    retire_date,
                     archived_at
                 ))
 
-                # إزالة العلاقة من جدول السائقين
+                # ✅ وأخيراً: إزالة العلاقة من جدول السائقين
                 c.execute("""
                     UPDATE drivers
                     SET assigned_plate = NULL,
@@ -1167,6 +1190,7 @@ class MedicalTransApp(tb.Window):
 
         # تحديث البيانات والقوائم
         self._load_car_data()
+        self._load_driver_table_data()
 
         updated_plates = self.get_all_license_plates()
         self.car_plate_combo['values'] = updated_plates
@@ -2555,6 +2579,7 @@ class MedicalTransApp(tb.Window):
                         self.show_info_popup("⚠️ تنبيه", f"فشل أرشفة العلاقة:\n{archive_err}")
 
                 self._load_driver_table_data()
+                self.driver_table.reload_callback()
                 self._load_car_data()
                 self._refresh_driver_comboboxes()
                 edit_win.destroy()
