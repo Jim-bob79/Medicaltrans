@@ -32,7 +32,7 @@ def setup_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT, address TEXT, phone TEXT,
             car_received_date TEXT,
-            car_returned_date TEXT,
+            employment_end_date TEXT,
             issues TEXT,
             contract_type TEXT)""")
         # تعديل جدول السائقين لإضافة حقول السيارة (إن لم تكن موجودة)
@@ -134,9 +134,9 @@ class MedicalTransApp(tb.Window):
             INNER JOIN drivers d ON dt.driver_name = d.name
             WHERE dt.driver_name = ? 
               AND dt.task_date = ?
-              AND (d.car_returned_date IS NULL 
-                   OR d.car_returned_date = '' 
-                   OR date(d.car_returned_date) >= date('now'))
+              AND (d.employment_end_date IS NULL 
+                   OR d.employment_end_date = '' 
+                   OR date(d.employment_end_date) >= date('now'))
         """, (driver_name, date))
         return [row for row in cursor.fetchall() if not self.is_on_vacation(row[0], date, "طبيب")]
 
@@ -401,7 +401,7 @@ class MedicalTransApp(tb.Window):
             self.edit_vac_end_picker.set(end_old)
             self.edit_vac_end_picker.entry.configure(justify="left")
 
-            def save_changes():
+            def save_vacation_edit_changes():
                 new_start = self.edit_vac_start_picker.get().strip()
                 new_end = self.edit_vac_end_picker.get().strip()
 
@@ -433,7 +433,7 @@ class MedicalTransApp(tb.Window):
             btn_frame = tb.Frame(main_frame)
             btn_frame.grid(row=4, column=0, columnspan=2, pady=15, sticky="ew")
 
-            ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(pady=5, ipadx=20, fill="x")
+            ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_vacation_edit_changes).pack(pady=5, ipadx=20, fill="x")
             main_frame.columnconfigure(1, weight=1)
 
         def delete_selected():
@@ -1699,7 +1699,7 @@ class MedicalTransApp(tb.Window):
 
             entries.append(entry)
 
-        def save_changes():
+        def save_car_edit_changes():
             new_data = [e.get().strip() if hasattr(e, 'get') else e.get() for e in entries]
             required_indexes = [0, 1, 2, 3]
 
@@ -1793,7 +1793,7 @@ class MedicalTransApp(tb.Window):
         btn_frame = tb.Frame(main_frame)
         btn_frame.grid(row=len(labels), column=0, columnspan=2, pady=15)
 
-        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes)\
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_car_edit_changes)\
             .pack(side="left", padx=10, ipadx=10)
 
         main_frame.columnconfigure(1, weight=1)
@@ -1887,39 +1887,45 @@ class MedicalTransApp(tb.Window):
         self._load_original_data(
             self.driver_table,
             """SELECT id, name, address, phone,
-                   car_received_date, car_returned_date,
+                   car_received_date, employment_end_date,
                    contract_type,
                    assigned_plate, plate_from, plate_to,
                    issues
             FROM drivers
-            WHERE car_returned_date IS NULL OR car_returned_date = '' 
-               OR date(car_returned_date) >= date('now')"""
+            WHERE employment_end_date IS NULL OR employment_end_date = '' 
+               OR date(employment_end_date) >= date('now')"""
         )
 
     def _load_current_drivers(self):
         with sqlite3.connect("medicaltrans.db") as conn:
             c = conn.cursor()
             c.execute("""
-                SELECT id, name, address, phone, car_received_date, car_returned_date, issues, contract_type
+                SELECT id, name, address, phone, car_received_date, employment_end_date, issues, contract_type
                 FROM drivers
-                WHERE car_returned_date IS NULL OR car_returned_date = '' OR date(car_returned_date) >= date('now')
+                WHERE employment_end_date IS NULL OR employment_end_date = '' OR date(employment_end_date) >= date('now')
             """)
             rows = c.fetchall()
 
         self.fill_treeview_with_rows(self.driver_table, rows)
 
-    def _load_archived_drivers(self):
+    def _load_archived_drivers(self, tree):
         with sqlite3.connect("medicaltrans.db") as conn:
             c = conn.cursor()
             c.execute("""
-                SELECT id, name, address, phone, car_received_date, car_returned_date, issues, contract_type
+                SELECT id, name, address, phone,
+                       car_received_date, employment_end_date, issues
                 FROM drivers
-                WHERE car_returned_date IS NOT NULL AND car_returned_date != '' AND date(car_returned_date) < date('now')
-                ORDER BY car_returned_date DESC
+                WHERE employment_end_date IS NOT NULL
+                  AND employment_end_date != ''
+                  AND date(employment_end_date) <= date('now')
+                ORDER BY employment_end_date DESC
             """)
             rows = c.fetchall()
 
-        self.fill_treeview_with_rows(self.driver_table, rows)
+        # إفراغ الجدول ثم تعبئته
+        tree.delete(*tree.get_children())
+        for row in rows:
+            tree.insert("", "end", values=row)
 
     def _load_archived_cars(self):
         today = datetime.today().strftime("%Y-%m-%d")
@@ -1943,7 +1949,7 @@ class MedicalTransApp(tb.Window):
             c.execute(f"""
                 SELECT * FROM {table_name}
                 WHERE {condition}
-                ORDER BY car_returned_date DESC
+                ORDER BY employment_end_date DESC
             """)
             rows = c.fetchall()
         treeview._original_items = [list(row) for row in rows]
@@ -2074,7 +2080,7 @@ class MedicalTransApp(tb.Window):
 
         columns = (
             "id", "name", "address", "phone",
-            "car_received_date", "car_returned_date",
+            "car_received_date", "employment_end_date",
             "contract_type",
             "assigned_plate", "plate_from", "plate_to",
             "issues"
@@ -2197,7 +2203,7 @@ class MedicalTransApp(tb.Window):
                 # التحقق من التكرار
                 c.execute("""
                     SELECT 1 FROM drivers
-                    WHERE name = ? AND (car_returned_date IS NULL OR car_returned_date = '' OR date(car_returned_date) > date('now'))
+                    WHERE name = ? AND (employment_end_date IS NULL OR employment_end_date = '' OR date(employment_end_date) > date('now'))
                 """, (driver_name,))
                 if c.fetchone():
                     self.show_info_popup("تنبيه", f"السائق '{driver_name}' لديه عقد حالي لم ينته بعد.")
@@ -2207,7 +2213,7 @@ class MedicalTransApp(tb.Window):
                 c.execute("""
                     INSERT INTO drivers (
                         name, address, phone,
-                        car_received_date, car_returned_date,
+                        car_received_date, employment_end_date,
                         assigned_plate, plate_from, plate_to,
                         issues, contract_type
                     )
@@ -2400,7 +2406,7 @@ class MedicalTransApp(tb.Window):
         notes_entry.grid(row=5, column=1, sticky="w", padx=(0, 5), pady=6)
         entries.append(notes_entry)
 
-        def save_changes():
+        def save_driver_edit_changes():
             new_data = [e.get().strip() if hasattr(e, 'get') else e.get() for e in entries]
             new_plate = plate_combo.get().strip()
             if new_plate.startswith("🔓") or new_plate.lower() == "none":
@@ -2466,7 +2472,7 @@ class MedicalTransApp(tb.Window):
                 c.execute("""
                     UPDATE drivers SET
                         name = ?, address = ?, phone = ?,
-                        car_received_date = ?, car_returned_date = ?,
+                        car_received_date = ?, employment_end_date = ?,
                         assigned_plate = ?, plate_from = ?, plate_to = ?,
                         issues = ?, contract_type = ?
                     WHERE id = ?
@@ -2513,6 +2519,41 @@ class MedicalTransApp(tb.Window):
                         self.show_info_popup("⚠️ تنبيه", f"لم يتم أرشفة العلاقة:\n{archive_err}")
 
                 conn.close()
+                # ✅ أرشفة السيارة تلقائيًا عند توفر العلاقة، أو عند نهاية العمل بدون plate_to
+                if new_plate and new_plate_from and (new_plate_to or new_to):
+                    archived_to = new_plate_to or new_to  # استخدم plate_to أو بديله
+                    archived_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    try:
+                        conn = sqlite3.connect("medicaltrans.db")
+                        c = conn.cursor()
+                        c.execute("""
+                            INSERT INTO driver_car_assignments_archive (
+                                driver_id, driver_name, assigned_plate,
+                                plate_from, plate_to, archived_at
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (
+                            driver_id,
+                            new_data[0],
+                            new_plate,
+                            new_plate_from,
+                            archived_to,
+                            archived_at
+                        ))
+                        c.execute("""
+                            UPDATE drivers SET
+                                assigned_plate = NULL,
+                                plate_from = NULL,
+                                plate_to = NULL
+                            WHERE id = ?
+                        """, (driver_id,))
+                        conn.commit()
+                        conn.close()
+                        if not new_plate_to and new_to:
+                            self.show_info_popup("معلومة", "✅ تم استخدام تاريخ نهاية العمل كتاريخ تسليم السيارة.")
+                    except Exception as archive_err:
+                        self.show_info_popup("⚠️ تنبيه", f"فشل أرشفة العلاقة:\n{archive_err}")
+
                 self._load_driver_table_data()
                 self._load_car_data()
                 self._refresh_driver_comboboxes()
@@ -2524,7 +2565,7 @@ class MedicalTransApp(tb.Window):
         btn_frame = tb.Frame(main_frame)
         btn_frame.grid(row=6, column=0, columnspan=6, pady=20)
 
-        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(anchor="center", ipadx=10)
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_driver_edit_changes).pack(anchor="center", ipadx=10)
 
         main_frame.columnconfigure(1, weight=1)
 
@@ -2835,7 +2876,7 @@ class MedicalTransApp(tb.Window):
             return
 
         # --- الأعمدة والعناوين ---
-        columns = ("id", "name", "address", "phone", "car_received_date", "car_returned_date", "issues")
+        columns = ("id", "name", "address", "phone", "car_received_date", "employment_end_date", "issues")
         labels = ["", "اسم السائق", "العنوان", "الهاتف", "من", "إلى", "ملاحظات"]
 
         # --- إنشاء النافذة والجدول ---
@@ -2935,7 +2976,7 @@ class MedicalTransApp(tb.Window):
         self.reload_archived_data(
             treeview=tree,
             table_name="drivers",
-            condition="car_returned_date IS NOT NULL AND car_returned_date != ''"
+            condition="employment_end_date IS NOT NULL AND employment_end_date != ''"
         )
 
         load_archived_drivers()
@@ -3129,7 +3170,7 @@ class MedicalTransApp(tb.Window):
             title_combo.set(event_titles[-1])  # تحديد أحدث عنوان تلقائيًا
             update_fields_from_title(None)     # تحميل بياناته مباشرة
 
-        def save_changes():
+        def save_calendar_edit_changes():
             new_title = title_combo.get().strip()
             new_desc = desc_entry.get("1.0", tb.END).strip()
 
@@ -3187,7 +3228,7 @@ class MedicalTransApp(tb.Window):
         btn_frame = tb.Frame(main_frame)
         btn_frame.grid(row=4, column=0, columnspan=2, pady=20, sticky="ew")
 
-        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes)\
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_calendar_edit_changes)\
             .pack(side="left", padx=10, expand=True, fill="x")
 
         main_frame.columnconfigure(1, weight=1)
@@ -3261,9 +3302,9 @@ class MedicalTransApp(tb.Window):
             c.execute("""
                 SELECT name 
                 FROM drivers 
-                WHERE (car_returned_date IS NULL 
-                       OR car_returned_date = '' 
-                       OR date(car_returned_date) >= date('now'))
+                WHERE (employment_end_date IS NULL 
+                       OR employment_end_date = '' 
+                       OR date(employment_end_date) >= date('now'))
                 ORDER BY name ASC
             """)
             return [row[0] for row in c.fetchall()]
@@ -3455,7 +3496,7 @@ class MedicalTransApp(tb.Window):
         date_picker.set(appt_date)
         date_picker.grid(row=2, column=1, pady=5)
 
-        def save_changes():
+        def save_appointment_edit_changes():
             new_plate = plate_entry.get().strip()
             new_type = type_entry.get().strip()
             new_date = date_picker.get().strip()
@@ -3480,7 +3521,7 @@ class MedicalTransApp(tb.Window):
             self._check_appointments()
             self.show_info_popup("تم", "✅ تم تعديل الموعد بنجاح.")
 
-        ttk.Button(frm, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).grid(row=3, columnspan=2, pady=15)
+        ttk.Button(frm, text="💾 حفظ التعديلات", style="Green.TButton", command=save_appointment_edit_changes).grid(row=3, columnspan=2, pady=15)
 
     def _show_archived_appointments_window(self):
         win, tree, _ = self.build_centered_popup("📁 المواعيد المؤرشفة", 700, 450, columns=("id", "car", "type", "date"),
