@@ -3552,16 +3552,97 @@ class MedicalTransApp(tb.Window):
 
         # زر تعديل جديد بجانب الطباعة
         def open_edit_popup():
-            driver = self.current_driver_filter_combo.get().strip()
-            if not driver:
-                self.show_info_popup("تنبيه", "يرجى تحديد اسم السائق.")
+            selected = tree.selection()
+            if not selected:
+                self.show_info_popup("تنبيه", "يرجى تحديد سطر يحتوي على مصروف وقود.")
                 return
 
-            current_month = datetime.today().strftime("%Y-%m")
-            self._edit_fuel_expense_popup(driver, current_month)
+            values = tree.item(selected[0], "values")
+            if not values or not values[0].strip():
+                self.show_info_popup("تنبيه", "⚠️ السطر المحدد لا يحتوي على اسم سائق صالح.")
+                return
+
+            old_driver = values[0].strip()
+            old_date = values[1].strip()
+            old_amount = values[2].strip()
+
+            # نافذة التعديل
+            edit_win = self.build_centered_popup("📝 تعديل مصروف الوقود", 400, 260)
+            frm = tb.Frame(edit_win, padding=20)
+            frm.pack(fill="both", expand=True)
+
+            # اسم السائق (قابل للتعديل)
+            ttk.Label(frm, text="اسم السائق:").pack(anchor="w")
+            driver_entry = ttk.Combobox(frm, values=self.get_driver_names(), width=30)
+            driver_entry.set(old_driver)
+            driver_entry.pack(anchor="w", pady=5)
+
+            # التاريخ
+            ttk.Label(frm, text="التاريخ:").pack(anchor="w")
+            date_picker = CustomDatePicker(frm)
+            date_picker.set(old_date)
+            date_picker.pack(anchor="w", pady=5)
+
+            # المبلغ
+            ttk.Label(frm, text="المبلغ (€):").pack(anchor="w")
+            amount_entry = tb.Entry(frm)
+            amount_entry.insert(0, old_amount)
+            amount_entry.pack(anchor="w", pady=5)
+
+            def save_edit():
+                new_driver = driver_entry.get().strip()
+                new_date = date_picker.get().strip()
+                try:
+                    new_amount = float(amount_entry.get().strip())
+                    if new_amount <= 0:
+                        raise ValueError
+                except:
+                    self.show_info_popup("خطأ", "المبلغ غير صالح.")
+                    return
+
+                if not new_driver or not new_date:
+                    self.show_info_popup("تنبيه", "يرجى إدخال اسم السائق والتاريخ.")
+                    return
+
+                # تحديث قاعدة البيانات
+                try:
+                    with sqlite3.connect("medicaltrans.db") as conn:
+                        c = conn.cursor()
+                        # التحقق من وجود السجل القديم بدقة (سائق، تاريخ، مبلغ)
+                        c.execute("""
+                            SELECT id FROM fuel_expenses
+                            WHERE driver_name = ? AND date = ? AND amount = ?
+                            LIMIT 1
+                        """, (old_driver, old_date, old_amount))
+                        row = c.fetchone()
+                        if not row:
+                            self.show_info_popup("خطأ", "لم يتم العثور على السجل الأصلي.")
+                            return
+                        expense_id = row[0]
+
+                        c.execute("""
+                            UPDATE fuel_expenses
+                            SET driver_name = ?, date = ?, amount = ?
+                            WHERE id = ?
+                        """, (new_driver, new_date, new_amount, expense_id))
+                        conn.commit()
+
+                    self.show_info_popup("✔️ تم", "✅ تم تعديل المصروف بنجاح.")
+                    edit_win.destroy()
+                    # إعادة تحميل جدول المصاريف بعد التعديل
+                    self._show_fuel_expense_table()
+                    # تحديث القوائم المنسدلة في حال تغير اسم السائق
+                    self._refresh_driver_comboboxes()
+                except Exception as e:
+                    self.show_info_popup("خطأ", f"فشل التعديل:\n{e}")
+
+            btns = tb.Frame(frm)
+            btns.pack(pady=10)
+            ttk.Button(btns, text="💾 حفظ", style="Green.TButton", command=save_edit).pack(side="left", padx=10, ipadx=15)
+            ttk.Button(btns, text="❌ إلغاء", style="Orange.TButton", command=edit_win.destroy).pack(side="left", padx=10, ipadx=15)
 
         ttk.Button(bottom_frame, text="✏️ تعديل", style="Purple.TButton", command=open_edit_popup).pack(side="left", padx=10)
-        
+
     def _edit_fuel_expense_popup(self, driver_name, year_month):
         win, tree, bottom_frame = self.build_centered_popup(
             f"✏️ تعديل مصاريف {driver_name} – {year_month}",
@@ -3616,65 +3697,6 @@ class MedicalTransApp(tb.Window):
 
         tree.bind("<Button-1>", on_click)
 
-        # تعديل بالسطر عند النقر المزدوج
-        def on_double_click(event):
-            item = tree.identify_row(event.y)
-            column = tree.identify_column(event.x)
-            if not item or column == "#4":
-                return
-
-            row_values = tree.item(item)["values"]
-            record_id, old_date, old_amount = row_values[:3]
-
-            edit_win = self.build_centered_popup("📝 تعديل المصروف", 400, 220)
-            frm = tb.Frame(edit_win, padding=20)
-            frm.pack(fill="both", expand=True)
-
-            ttk.Label(frm, text="📅 التاريخ:").pack(anchor="w")
-            date_picker = CustomDatePicker(frm)
-            date_picker.set(old_date)
-            date_picker.pack(anchor="w", pady=5)
-
-            ttk.Label(frm, text="💶 المبلغ (€):").pack(anchor="w")
-            amount_entry = tb.Entry(frm)
-            amount_entry.insert(0, old_amount)
-            amount_entry.pack(anchor="w", pady=5)
-
-            def save_edit():
-                new_date = date_picker.get().strip()
-                try:
-                    new_amount = float(amount_entry.get().strip())
-                    if new_amount <= 0:
-                        raise ValueError
-                except:
-                    self.show_info_popup("خطأ", "المبلغ غير صالح.")
-                    return
-
-                try:
-                    with sqlite3.connect("medicaltrans.db") as conn:
-                        c = conn.cursor()
-                        c.execute("""
-                            UPDATE fuel_expenses
-                            SET date = ?, amount = ?
-                            WHERE id = ?
-                        """, (new_date, new_amount, record_id))
-                        conn.commit()
-
-                    # تحديث السطر في الجدول
-                    tree.item(item, values=(record_id, new_date, f"{new_amount:.2f}", "🗑 حذف"))
-                    self.apply_alternate_row_colors(tree)
-                    edit_win.destroy()
-                    self.show_info_popup("✔️ تم", "✅ تم تعديل المصروف.")
-                except Exception as e:
-                    self.show_info_popup("خطأ", f"فشل التعديل:\n{e}")
-
-            ttk.Button(frm, text="💾 حفظ", style="Green.TButton", command=save_edit).pack(pady=10, ipadx=15)
-
-            tree.bind("<Double-1>", on_double_click)
-
-            # زر طباعة
-            ttk.Button(bottom_frame, text="🖨️ طباعة هذا التقرير", style="info.TButton",
-                       command=lambda: self._export_monthly_fuel_pdf(driver_name, year_month)).pack(side="left", padx=10)
 
     def _show_filtered_fuel_expenses(self, driver_name, start_date, end_date):
         win, tree, bottom_frame = self.build_centered_popup("📊 مصاريف محددة", 850, 500,
