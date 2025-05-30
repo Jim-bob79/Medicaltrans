@@ -2520,6 +2520,10 @@ class MedicalTransApp(tb.Window):
             archived = False
             extra_message = ""
 
+            # ✅ منع إنهاء العقد إذا لم يتم إنهاء استخدام السيارة
+            if new_to and new_plate and not new_plate_to:
+                self.show_info_popup("تنبيه", "❗ يجب أولاً إنهاء استخدام السيارة (إدخال تاريخ 'إلى') قبل إنهاء عقد السائق.")
+                return
             # ❗ التحقق من الشروط
             if not new_plate and (new_plate_from or new_plate_to):
                 self.show_info_popup("تنبيه", "❗ لا يمكن إدخال تاريخ بدون اختيار سيارة.\nيرجى إما اختيار سيارة أو حذف التواريخ.")
@@ -3495,9 +3499,8 @@ class MedicalTransApp(tb.Window):
 
         # سائق محدد (أو الكل)
         ttk.Label(filter_frame, text="السائق:").pack(side="left", padx=(0, 5))
-        driver_filter_combo = ttk.Combobox(filter_frame, values=["🔄 الكل"] + self.get_driver_names(), width=20, state="readonly")
+        driver_filter_combo = ttk.Combobox(filter_frame, values=self.get_driver_names(), width=20, state="readonly")
         self.current_driver_filter_combo = driver_filter_combo
-        driver_filter_combo.set("🔄 الكل")
         driver_filter_combo.pack(side="left", padx=(0, 15))
 
         # من تاريخ
@@ -3513,8 +3516,6 @@ class MedicalTransApp(tb.Window):
         # زر التصفية
         def apply_filter():
             name = driver_filter_combo.get().strip()
-            if name == "🔄 الكل":
-                name = ""
             start = from_picker.get().strip()
             end = to_picker.get().strip()
             self._show_filtered_fuel_expenses(name, start, end)
@@ -3552,8 +3553,8 @@ class MedicalTransApp(tb.Window):
         # زر تعديل جديد بجانب الطباعة
         def open_edit_popup():
             driver = self.current_driver_filter_combo.get().strip()
-            if not driver or driver == "🔄 الكل":
-                self.show_info_popup("تنبيه", "يرجى اختيار اسم سائق محدد (ليس الكل).")
+            if not driver:
+                self.show_info_popup("تنبيه", "يرجى تحديد اسم السائق.")
                 return
 
             current_month = datetime.today().strftime("%Y-%m")
@@ -3706,25 +3707,37 @@ class MedicalTransApp(tb.Window):
         tree._original_items = rows
         tree.delete(*tree.get_children())
 
+        total = 0.0  # ← جمع المبالغ
+
         for i, (driver, date_str, amount) in enumerate(rows):
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
-            tree.insert("", "end", values=(driver, date_str, f"{amount:.2f}"), tags=(tag,))
-            tree._original_items.append([driver, date_str, f"{amount:.2f}"])
 
-        # ✅ إضافة صف الإجمالي
-        total = sum(amount for _, _, amount in rows)
+            try:
+                amount_float = float(amount)
+            except (ValueError, TypeError):
+                amount_float = 0.0
+
+            total += amount_float
+            formatted_amount = f"{amount_float:.2f}"
+
+            tree.insert("", "end", values=(driver, date_str, formatted_amount), tags=(tag,))
+            tree._original_items.append([driver, date_str, formatted_amount])
+
+        # ✅ صف الإجمالي مباشرة بعد السطور العادية
         tree.insert("", "end", values=("", "📌 الإجمالي", f"{total:.2f}"), tags=("total",))
-
         tree.tag_configure("total", background="#e6e6e6", font=("Helvetica", 10, "bold"))
 
         self.apply_alternate_row_colors(tree)
 
-        # زر طباعة
-        ttk.Button(bottom_frame, text="🖨️ طباعة", style="info.TButton",
+        # ===== أزرار الطباعة والإغلاق في المنتصف =====
+        inner_buttons = tb.Frame(bottom_frame)
+        inner_buttons.pack(anchor="center")
+
+        ttk.Button(inner_buttons, text="🖨️ طباعة", style="info.TButton",
                    command=lambda: self.export_table_to_pdf(tree, "تقرير مصاريف مفلترة")).pack(side="left", padx=10)
 
-        # زر إغلاق
-        ttk.Button(bottom_frame, text="❌ إغلاق", style="danger.TButton", command=win.destroy).pack(side="right", padx=10)
+        ttk.Button(inner_buttons, text="❌ إغلاق", style="danger.TButton",
+                   command=win.destroy).pack(side="left", padx=10)
 
     def _export_monthly_fuel_pdf(self, driver_name, year_month):
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
