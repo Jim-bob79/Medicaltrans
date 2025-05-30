@@ -104,7 +104,15 @@ def setup_database():
             appointment_type TEXT,
             appointment_date TEXT
         )""")
-    
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS fuel_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                driver_name TEXT,
+                date TEXT,
+                amount REAL
+            )
+        """)
     conn.commit()
 
 class MedicalTransApp(tb.Window):
@@ -1153,7 +1161,7 @@ class MedicalTransApp(tb.Window):
 
             if row:
                 driver_id, driver_name, plate_from = row
-                archived_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                archived_at = datetime.now().strftime("%Y-%m-%d")
 
                 # ✅ أولاً: تحديث plate_to في جدول السائقين
                 c.execute("""
@@ -1188,13 +1196,40 @@ class MedicalTransApp(tb.Window):
 
             conn.commit()
 
-        # تحديث البيانات والقوائم
-        self._load_car_data()
-        self._load_driver_table_data()
+            # ✅ أرشفة المواعيد المستقبلية المرتبطة بالسيارة
+            c.execute("""
+                INSERT INTO archived_car_appointments (license_plate, appointment_type, appointment_date)
+                SELECT license_plate, appointment_type, appointment_date
+                FROM car_appointments
+                WHERE license_plate = ? AND date(appointment_date) >= date(?)
+            """, (plate, today_str))
+
+            # ✅ حذفها من جدول المواعيد النشطة
+            c.execute("""
+                DELETE FROM car_appointments
+                WHERE license_plate = ? AND date(appointment_date) >= date(?)
+            """, (plate, today_str))
+
+            conn.commit()
+
+        # ✅ تحديث فوري لواجهة المستخدم بعد التعديل في قاعدة البيانات
+        self._load_driver_table_data()     # ← أولًا: تحديث جدول السائقين ليعكس تفريغ السيارة
+        self._load_car_data()              # ← ثانيًا: تحديث جدول السيارات
 
         updated_plates = self.get_all_license_plates()
-        self.car_plate_combo['values'] = updated_plates
-        self.retire_plate_combo['values'] = updated_plates
+
+        # ✅ تحديث القوائم المنسدلة إن وُجدت (مع التحقق من وجودها)
+        if hasattr(self, "car_plate_combo") and self.car_plate_combo.winfo_exists():
+            self.car_plate_combo["values"] = updated_plates
+
+        if hasattr(self, "retire_plate_combo") and self.retire_plate_combo.winfo_exists():
+            self.retire_plate_combo["values"] = updated_plates
+
+        if hasattr(self, "plate_combo") and self.plate_combo.winfo_exists():
+            self.plate_combo["values"] = self._get_available_cars_for_drivers()
+
+        if hasattr(self, "driver_car_plate_combo") and self.driver_car_plate_combo.winfo_exists():
+            self.driver_car_plate_combo["values"] = self._get_available_cars_for_drivers()
 
         # إعادة تعيين الحقول
         self.retire_plate_combo.set("")
@@ -1475,12 +1510,13 @@ class MedicalTransApp(tb.Window):
                    OR date(substr(notes, instr(notes, 'بتاريخ') + 7, 10)) > date('now'))
             ORDER BY id DESC"""
         )
+        
         # ✅ تحديث قائمة رقم السيارة في تبويب السائقين
-        if hasattr(self, "driver_car_plate_combo"):
+        if hasattr(self, "driver_car_plate_combo") and self.driver_car_plate_combo.winfo_exists():
             self.driver_car_plate_combo["values"] = self._get_available_cars_for_drivers()
 
         # ✅ تحديث قائمة رقم السيارة في نافذة تعديل السائق (إن وُجدت)
-        if hasattr(self, "plate_combo"):
+        if hasattr(self, "plate_combo") and self.plate_combo.winfo_exists():
             self.plate_combo["values"] = self._get_available_cars_for_drivers()
 
     def check_warnings(self):
@@ -1751,8 +1787,6 @@ class MedicalTransApp(tb.Window):
                         new_data[2] != old_record[3] or
                         new_data[3] != old_record[4]):
         
-                        print("📦 سيتم أرشفة السجل القديم بسبب تعديل التواريخ")
-
                         # ✅ أرشفة البيانات مع تجاهل id (old_record[1:])
                         c.execute("""
                             INSERT INTO archived_car_maintenance (
@@ -1981,11 +2015,43 @@ class MedicalTransApp(tb.Window):
 
     def _build_driver_tab(self):
         frame = tb.Frame(self.content_frame, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        top_row = tb.Frame(frame)
+        top_row.pack(fill="x", padx=10, pady=10)
+        top_row.columnconfigure(0, weight=1)
+        top_row.columnconfigure(1, weight=1)
+
         self.driver_entries = []
 
-        # ==== إطار الحقول الجديد ====
-        form_frame = ttk.LabelFrame(frame, text="📋 بيانات السائق الجديد", padding=15)
-        form_frame.pack(fill="x", padx=10, pady=10)
+        # ==== إطار بيانات السائق ====
+        form_frame = ttk.LabelFrame(top_row, text="📋 بيانات السائق الجديد", padding=15)
+        form_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        # ==== إطار مصاريف الوقود ====
+        fuel_frame = ttk.LabelFrame(top_row, text="⛽ مصاريف الوقود", padding=15)
+        fuel_frame.grid(row=0, column=1, sticky="nsew")
+
+        # --- اسم السائق ---
+        ttk.Label(fuel_frame, text="اسم السائق:").pack(anchor="w", pady=5)
+        self.fuel_driver_combo = ttk.Combobox(fuel_frame, values=self.get_driver_names(), state="readonly", width=30)
+        self.fuel_driver_combo.pack(anchor="w", pady=5)
+
+        # --- التاريخ ---
+        ttk.Label(fuel_frame, text="التاريخ:").pack(anchor="w", pady=5)
+        self.fuel_date_picker = CustomDatePicker(fuel_frame)
+        self.fuel_date_picker.pack(anchor="w", pady=5)
+
+        # --- المبلغ ---
+        ttk.Label(fuel_frame, text="المبلغ (€):").pack(anchor="w", pady=5)
+        self.fuel_amount_entry = tb.Entry(fuel_frame, width=20)
+        self.fuel_amount_entry.pack(anchor="w", pady=5)
+
+        # --- أزرار ---
+        btns_frame = tb.Frame(fuel_frame)
+        btns_frame.pack(pady=10)
+        ttk.Button(btns_frame, text="💾 حفظ", style="Green.TButton", command=self._save_fuel_expense).pack(side="left", padx=5)
+        ttk.Button(btns_frame, text="📊 عرض", style="info.TButton", command=self._show_fuel_expense_table).pack(side="left", padx=5)
 
         # --- حقل: اسم السائق + من + إلى ---
         name_label_frame = tb.Frame(form_frame)
@@ -2270,7 +2336,7 @@ class MedicalTransApp(tb.Window):
 
         # أرشفة العلاقة إذا تم إدخال تاريخ تسليم السيارة
         if assigned_plate and plate_from and plate_to:
-            archived_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            archived_at = datetime.now().strftime("%Y-%m-%d")
             try:
                 with sqlite3.connect("medicaltrans.db") as conn:
                     c = conn.cursor()
@@ -2330,6 +2396,15 @@ class MedicalTransApp(tb.Window):
         assigned_plate = values[7] if len(values) > 7 else ""
         plate_from = values[8] if len(values) > 8 else ""
         plate_to = values[9] if len(values) > 9 else ""
+
+        if not assigned_plate or assigned_plate.lower() == "none":
+            assigned_plate = "🔓 بدون سيارة"
+
+        # 🧼 تنظيف التواريخ إذا لم توجد سيارة
+        if assigned_plate == "🔓 بدون سيارة":
+            plate_from = ""
+            plate_to = ""
+
         issues = values[10] if len(values) > 10 else ""
 
         edit_win = self.build_centered_popup("📝 تعديل بيانات السائق", 900, 350)
@@ -2430,41 +2505,34 @@ class MedicalTransApp(tb.Window):
         notes_entry.grid(row=5, column=1, sticky="w", padx=(0, 5), pady=6)
         entries.append(notes_entry)
 
-        def save_driver_edit_changes():
+        def save_driver_edit_changes(edit_win):
             new_data = [e.get().strip() if hasattr(e, 'get') else e.get() for e in entries]
             new_plate = plate_combo.get().strip()
             if new_plate.startswith("🔓") or new_plate.lower() == "none":
                 new_plate = ""
             new_plate_from = plate_from_picker.get().strip()
             new_plate_to = plate_to_picker.get().strip()
-
-            # ❗ لا يمكن إدخال أي تواريخ مرتبطة بسيارة بدون اختيار سيارة
-            if not new_plate and (new_plate_from or new_plate_to):
-                self.show_info_popup(
-                    "تنبيه",
-                    "❗ لا يمكن إدخال تاريخ بدون اختيار سيارة.\nيرجى إما اختيار سيارة أو حذف التواريخ."
-                )
-                return
-
-            # ❗ لا يمكن إدخال تاريخ تسليم بدون تاريخ استلام
-            if new_plate and new_plate_to and not new_plate_from:
-                self.show_info_popup(
-                    "تنبيه",
-                    "❗ لا يمكن إدخال تاريخ تسليم (إلى) بدون إدخال تاريخ استلام (من)."
-                )
-                return
-
+            if not new_plate:
+                new_plate_from = ""
+                new_plate_to = ""
             new_from = from_picker.get().strip()
             new_to = to_picker.get().strip()
+            archived = False
+            extra_message = ""
 
+            # ❗ التحقق من الشروط
+            if not new_plate and (new_plate_from or new_plate_to):
+                self.show_info_popup("تنبيه", "❗ لا يمكن إدخال تاريخ بدون اختيار سيارة.\nيرجى إما اختيار سيارة أو حذف التواريخ.")
+                return
+            if new_plate and new_plate_to and not new_plate_from:
+                self.show_info_popup("تنبيه", "❗ لا يمكن إدخال تاريخ تسليم (إلى) بدون إدخال تاريخ استلام (من).")
+                return
             if not new_data[0]:
                 self.show_info_popup("تنبيه", "يرجى إدخال اسم السائق.")
                 return
-
             if new_from and new_to:
                 if not self.validate_date_range(new_from, new_to, context="مدة العمل"):
                     return
-
             if new_plate_from and not new_plate:
                 self.show_info_popup("تنبيه", "يرجى اختيار رقم اللوحة.")
                 return
@@ -2474,12 +2542,9 @@ class MedicalTransApp(tb.Window):
             if new_plate_from and new_plate_to:
                 if not self.validate_date_range(new_plate_from, new_plate_to, context="السيارة"):
                     return
-            # إذا كانت هناك سيارة مرتبطة، وتم إدخال نهاية العمل، ولم يُدخل تاريخ تسليم السيارة:
             if new_plate and new_to and not new_plate_to:
                 new_plate_to = new_to
                 self.show_info_popup("معلومة", "✅ تم استخدام تاريخ نهاية العمل كتاريخ تسليم السيارة، لأن حقل التسليم كان فارغًا.")
-
-            # تحقق من توافق تاريخ استلام السيارة مع تاريخ بداية العمل
             if new_plate_from and new_from:
                 try:
                     d_from = datetime.strptime(new_from, "%Y-%m-%d")
@@ -2488,11 +2553,56 @@ class MedicalTransApp(tb.Window):
                         self.show_info_popup("تنبيه", "تاريخ استلام السيارة يجب أن يكون في نفس يوم بداية العمل أو بعده.")
                         return
                 except ValueError:
-                    pass  # تجاهل في حال تنسيقات غير صالحة
+                    pass
 
             try:
                 conn = sqlite3.connect("medicaltrans.db")
                 c = conn.cursor()
+
+                # ✅ استخراج رقم اللوحة الأصلي من قاعدة البيانات
+                c.execute("SELECT assigned_plate, plate_to FROM drivers WHERE id = ?", (driver_id,))
+                row = c.fetchone()
+                original_plate = row[0] if row else ""
+                original_plate_to = row[1] if row else ""
+
+                # ✅ لا يسمح بتغيير السيارة دون إنهاء السابقة أولًا
+                if original_plate and original_plate != new_plate and not original_plate_to:
+                    self.show_info_popup("تنبيه", "❗ لا يمكن تغيير السيارة الحالية قبل إدخال تاريخ تسليم لها، أو إعادة اختيار نفس السيارة إن لم ترغب بتغييرها..")
+                    conn.close()
+                    return
+
+                # ✅ أرشفة السيارة القديمة
+                if original_plate and new_plate != original_plate:
+                    try:
+                        if not new_plate_to:
+                            new_plate_to = datetime.today().strftime("%Y-%m-%d")
+                            extra_message = "📌 تم استخدام تاريخ اليوم كتاريخ تسليم السيارة السابقة."
+                        archived_at = datetime.now().strftime("%Y-%m-%d")
+                        c.execute("""
+                            INSERT INTO driver_car_assignments_archive (
+                                driver_id, driver_name, assigned_plate,
+                                plate_from, plate_to, archived_at
+                            )
+                            SELECT id, name, assigned_plate, plate_from, ?, ?
+                            FROM drivers
+                            WHERE id = ? AND assigned_plate IS NOT NULL AND plate_from IS NOT NULL
+                        """, (new_plate_to, archived_at, driver_id))
+                        conn.commit()
+
+                        c.execute("""
+                            UPDATE drivers SET
+                                assigned_plate = NULL,
+                                plate_from = NULL,
+                                plate_to = NULL
+                            WHERE id = ?
+                        """, (driver_id,))
+                        conn.commit()
+                    except Exception as e:
+                        self.show_info_popup("⚠️ تنبيه", f"فشل أرشفة السيارة السابقة:\n{e}")
+                        conn.close()
+                        return
+
+                # ✅ تحديث بيانات السائق بعد الأرشفة
                 c.execute("""
                     UPDATE drivers SET
                         name = ?, address = ?, phone = ?,
@@ -2503,20 +2613,19 @@ class MedicalTransApp(tb.Window):
                 """, (
                     new_data[0], new_data[1], new_data[2],
                     new_from, new_to,
-                    new_plate if new_plate else None,
-                    new_plate_from if new_plate_from else None,
-                    new_plate_to if new_plate_to else None,
-                    new_data[4],  # الملاحظات
-                    new_data[3],  # نوع العقد
+                    new_plate or None,
+                    new_plate_from or None,
+                    new_plate_to or None,
+                    new_data[4],
+                    new_data[3],
                     driver_id
                 ))
                 conn.commit()
 
+                # ✅ أرشفة السيارة الجديدة فورًا إذا مكتملة
                 if new_plate and new_plate_from and new_plate_to:
-                    archived_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     try:
-                        conn = sqlite3.connect("medicaltrans.db")
-                        c = conn.cursor()
+                        archived_at = datetime.now().strftime("%Y-%m-%d")
                         c.execute("""
                             INSERT INTO driver_car_assignments_archive (
                                 driver_id, driver_name, assigned_plate,
@@ -2539,15 +2648,17 @@ class MedicalTransApp(tb.Window):
                             WHERE id = ?
                         """, (driver_id,))
                         conn.commit()
+                        archived = True
                     except Exception as archive_err:
                         self.show_info_popup("⚠️ تنبيه", f"لم يتم أرشفة العلاقة:\n{archive_err}")
 
                 conn.close()
-                # ✅ أرشفة السيارة تلقائيًا عند توفر العلاقة، أو عند نهاية العمل بدون plate_to
-                if new_plate and new_plate_from and (new_plate_to or new_to):
-                    archived_to = new_plate_to or new_to  # استخدم plate_to أو بديله
-                    archived_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # ✅ أرشفة عند نهاية العمل إن لم تتم الأرشفة مسبقًا
+                if not archived and new_plate and new_plate_from and (new_plate_to or new_to):
                     try:
+                        archived_to = new_plate_to or new_to
+                        archived_at = datetime.now().strftime("%Y-%m-%d")
                         conn = sqlite3.connect("medicaltrans.db")
                         c = conn.cursor()
                         c.execute("""
@@ -2578,19 +2689,24 @@ class MedicalTransApp(tb.Window):
                     except Exception as archive_err:
                         self.show_info_popup("⚠️ تنبيه", f"فشل أرشفة العلاقة:\n{archive_err}")
 
+                # ✅ التحديث النهائي وإغلاق النافذة
                 self._load_driver_table_data()
                 self.driver_table.reload_callback()
                 self._load_car_data()
                 self._refresh_driver_comboboxes()
                 edit_win.destroy()
-                self.show_info_popup("✔️ تم التعديل", "✅ تم تعديل بيانات السائق بنجاح.")
+                message = "✅ تم تعديل بيانات السائق بنجاح."
+                if extra_message:
+                    message += f"\n{extra_message}"
+                self.show_info_popup("✔️ تم التعديل", message)
+
             except Exception as e:
                 self.show_info_popup("خطأ", f"فشل التعديل:\n{e}")
 
         btn_frame = tb.Frame(main_frame)
         btn_frame.grid(row=6, column=0, columnspan=6, pady=20)
 
-        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_driver_edit_changes).pack(anchor="center", ipadx=10)
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=lambda: save_driver_edit_changes(edit_win)).pack(anchor="center", ipadx=10)
 
         main_frame.columnconfigure(1, weight=1)
 
@@ -3334,6 +3450,340 @@ class MedicalTransApp(tb.Window):
             """)
             return [row[0] for row in c.fetchall()]
 
+    def _save_fuel_expense(self):
+        name = self.fuel_driver_combo.get().strip()
+        date = self.fuel_date_picker.get().strip()
+        amount = self.fuel_amount_entry.get().strip()
+
+        if not name or not date or not amount:
+            self.show_info_popup("تنبيه", "يرجى ملء كل الحقول.")
+            return
+
+        try:
+            amount = float(amount)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            self.show_info_popup("خطأ", "صيغة المبلغ غير صحيحة. يجب أن يكون رقمًا موجبًا.")
+            return
+
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute(
+                    "INSERT INTO fuel_expenses (driver_name, date, amount) VALUES (?, ?, ?)",
+                    (name, date, amount)
+                )
+                conn.commit()
+
+            self.show_info_popup("✔️ تم الحفظ", "✅ تم حفظ مصروف الوقود.")
+            self.fuel_driver_combo.set("")
+            self.fuel_date_picker.entry.delete(0, tb.END)
+            self.fuel_amount_entry.delete(0, tb.END)
+
+        except Exception as e:
+            self.show_info_popup("خطأ", f"فشل الحفظ:\n{e}")
+
+    def _show_fuel_expense_table(self):
+        win, tree, bottom_frame = self.build_centered_popup("📊 مصاريف الوقود", 850, 500,
+            columns=("driver", "date", "amount"),
+            column_labels=["اسم السائق", "تاريخ الدفع", "المبلغ (€)"]
+        )
+
+        filter_frame = tb.Frame(win)
+        filter_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        # سائق محدد (أو الكل)
+        ttk.Label(filter_frame, text="السائق:").pack(side="left", padx=(0, 5))
+        driver_filter_combo = ttk.Combobox(filter_frame, values=["🔄 الكل"] + self.get_driver_names(), width=20, state="readonly")
+        self.current_driver_filter_combo = driver_filter_combo
+        driver_filter_combo.set("🔄 الكل")
+        driver_filter_combo.pack(side="left", padx=(0, 15))
+
+        # من تاريخ
+        ttk.Label(filter_frame, text="من:").pack(side="left")
+        from_picker = CustomDatePicker(filter_frame)
+        from_picker.pack(side="left", padx=(0, 10))
+
+        # إلى تاريخ
+        ttk.Label(filter_frame, text="إلى:").pack(side="left")
+        to_picker = CustomDatePicker(filter_frame)
+        to_picker.pack(side="left", padx=(0, 10))
+
+        # زر التصفية
+        def apply_filter():
+            name = driver_filter_combo.get().strip()
+            if name == "🔄 الكل":
+                name = ""
+            start = from_picker.get().strip()
+            end = to_picker.get().strip()
+            self._show_filtered_fuel_expenses(name, start, end)
+
+        ttk.Button(filter_frame, text="🔍 تطبيق الفلتر", style="info.TButton", command=apply_filter).pack(side="left", padx=(10, 0))
+
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+            c.execute("""
+                SELECT driver_name, date, amount FROM fuel_expenses
+                ORDER BY date ASC
+            """)
+            rows = c.fetchall()
+            conn.close()
+        except Exception as e:
+            self.show_info_popup("خطأ", f"فشل تحميل البيانات:\n{e}")
+            return
+
+        # تعبئة الجدول
+        tree._original_items = []
+        tree.delete(*tree.get_children())
+
+        for i, (driver, date_str, amount) in enumerate(rows):
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            tree.insert("", "end", values=(driver, date_str, f"{amount:.2f}"), tags=(tag,))
+            tree._original_items.append([driver, date_str, f"{amount:.2f}"])
+
+        self.apply_alternate_row_colors(tree)
+
+        # زر طباعة
+        ttk.Button(bottom_frame, text="🖨️ طباعة", style="info.TButton",
+                   command=lambda: self.export_table_to_pdf(tree, "تقرير مصاريف الوقود")).pack(side="left", padx=10)
+
+        # زر تعديل جديد بجانب الطباعة
+        def open_edit_popup():
+            driver = self.current_driver_filter_combo.get().strip()
+            if not driver or driver == "🔄 الكل":
+                self.show_info_popup("تنبيه", "يرجى اختيار اسم سائق محدد (ليس الكل).")
+                return
+
+            current_month = datetime.today().strftime("%Y-%m")
+            self._edit_fuel_expense_popup(driver, current_month)
+
+        ttk.Button(bottom_frame, text="✏️ تعديل", style="Purple.TButton", command=open_edit_popup).pack(side="left", padx=10)
+        
+    def _edit_fuel_expense_popup(self, driver_name, year_month):
+        win, tree, bottom_frame = self.build_centered_popup(
+            f"✏️ تعديل مصاريف {driver_name} – {year_month}",
+            700, 450,
+            columns=("id", "date", "amount", "action"),
+            column_labels=["", "التاريخ", "المبلغ (€)", "حذف"]
+        )
+
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT id, date, amount
+                FROM fuel_expenses
+                WHERE driver_name = ? AND strftime('%Y-%m', date) = ?
+                ORDER BY date ASC
+            """, (driver_name, year_month))
+            rows = c.fetchall()
+
+        tree._original_items = []
+        tree.delete(*tree.get_children())
+
+        for i, (row_id, date_str, amount) in enumerate(rows):
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            values = (row_id, date_str, f"{amount:.2f}", "🗑 حذف")
+            tree.insert("", "end", values=values, tags=(tag,))
+            tree._original_items.append(values)
+
+        self.apply_alternate_row_colors(tree)
+
+        # حذف السجل عند الضغط على زر الحذف
+        def on_click(event):
+            item = tree.identify_row(event.y)
+            column = tree.identify_column(event.x)
+            if not item or column != "#4":
+                return
+
+            row_values = tree.item(item)["values"]
+            record_id, date_val = row_values[0], row_values[1]
+
+            if not self.show_custom_confirm("تأكيد الحذف", f"⚠️ هل تريد حذف المصروف بتاريخ {date_val}؟"):
+                return
+
+            try:
+                with sqlite3.connect("medicaltrans.db") as conn:
+                    c = conn.cursor()
+                    c.execute("DELETE FROM fuel_expenses WHERE id = ?", (record_id,))
+                    conn.commit()
+                tree.delete(item)
+                self.show_info_popup("✔️ تم الحذف", "✅ تم حذف المصروف بنجاح.")
+            except Exception as e:
+                self.show_info_popup("خطأ", f"فشل الحذف:\n{e}")
+
+        tree.bind("<Button-1>", on_click)
+
+        # تعديل بالسطر عند النقر المزدوج
+        def on_double_click(event):
+            item = tree.identify_row(event.y)
+            column = tree.identify_column(event.x)
+            if not item or column == "#4":
+                return
+
+            row_values = tree.item(item)["values"]
+            record_id, old_date, old_amount = row_values[:3]
+
+            edit_win = self.build_centered_popup("📝 تعديل المصروف", 400, 220)
+            frm = tb.Frame(edit_win, padding=20)
+            frm.pack(fill="both", expand=True)
+
+            ttk.Label(frm, text="📅 التاريخ:").pack(anchor="w")
+            date_picker = CustomDatePicker(frm)
+            date_picker.set(old_date)
+            date_picker.pack(anchor="w", pady=5)
+
+            ttk.Label(frm, text="💶 المبلغ (€):").pack(anchor="w")
+            amount_entry = tb.Entry(frm)
+            amount_entry.insert(0, old_amount)
+            amount_entry.pack(anchor="w", pady=5)
+
+            def save_edit():
+                new_date = date_picker.get().strip()
+                try:
+                    new_amount = float(amount_entry.get().strip())
+                    if new_amount <= 0:
+                        raise ValueError
+                except:
+                    self.show_info_popup("خطأ", "المبلغ غير صالح.")
+                    return
+
+                try:
+                    with sqlite3.connect("medicaltrans.db") as conn:
+                        c = conn.cursor()
+                        c.execute("""
+                            UPDATE fuel_expenses
+                            SET date = ?, amount = ?
+                            WHERE id = ?
+                        """, (new_date, new_amount, record_id))
+                        conn.commit()
+
+                    # تحديث السطر في الجدول
+                    tree.item(item, values=(record_id, new_date, f"{new_amount:.2f}", "🗑 حذف"))
+                    self.apply_alternate_row_colors(tree)
+                    edit_win.destroy()
+                    self.show_info_popup("✔️ تم", "✅ تم تعديل المصروف.")
+                except Exception as e:
+                    self.show_info_popup("خطأ", f"فشل التعديل:\n{e}")
+
+            ttk.Button(frm, text="💾 حفظ", style="Green.TButton", command=save_edit).pack(pady=10, ipadx=15)
+
+            tree.bind("<Double-1>", on_double_click)
+
+            # زر طباعة
+            ttk.Button(bottom_frame, text="🖨️ طباعة هذا التقرير", style="info.TButton",
+                       command=lambda: self._export_monthly_fuel_pdf(driver_name, year_month)).pack(side="left", padx=10)
+
+    def _show_filtered_fuel_expenses(self, driver_name, start_date, end_date):
+        win, tree, bottom_frame = self.build_centered_popup("📊 مصاريف محددة", 850, 500,
+            columns=("driver", "date", "amount"),
+            column_labels=["اسم السائق", "تاريخ الدفع", "المبلغ (€)"]
+        )
+
+        query = "SELECT driver_name, date, amount FROM fuel_expenses WHERE 1=1"
+        params = []
+
+        if driver_name:
+            query += " AND driver_name = ?"
+            params.append(driver_name)
+
+        if start_date:
+            query += " AND date(date) >= date(?)"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND date(date) <= date(?)"
+            params.append(end_date)
+
+        query += " ORDER BY date ASC"
+
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute(query, tuple(params))
+            rows = c.fetchall()
+
+        tree._original_items = rows
+        tree.delete(*tree.get_children())
+
+        for i, (driver, date_str, amount) in enumerate(rows):
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            tree.insert("", "end", values=(driver, date_str, f"{amount:.2f}"), tags=(tag,))
+            tree._original_items.append([driver, date_str, f"{amount:.2f}"])
+
+        # ✅ إضافة صف الإجمالي
+        total = sum(amount for _, _, amount in rows)
+        tree.insert("", "end", values=("", "📌 الإجمالي", f"{total:.2f}"), tags=("total",))
+
+        tree.tag_configure("total", background="#e6e6e6", font=("Helvetica", 10, "bold"))
+
+        self.apply_alternate_row_colors(tree)
+
+        # زر طباعة
+        ttk.Button(bottom_frame, text="🖨️ طباعة", style="info.TButton",
+                   command=lambda: self.export_table_to_pdf(tree, "تقرير مصاريف مفلترة")).pack(side="left", padx=10)
+
+        # زر إغلاق
+        ttk.Button(bottom_frame, text="❌ إغلاق", style="danger.TButton", command=win.destroy).pack(side="right", padx=10)
+
+    def _export_monthly_fuel_pdf(self, driver_name, year_month):
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        import tempfile
+
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("""
+                    SELECT date, amount FROM fuel_expenses
+                    WHERE driver_name = ? AND strftime('%Y-%m', date) = ?
+                    ORDER BY date
+                """, (driver_name, year_month))
+                rows = c.fetchall()
+
+            if not rows:
+                self.show_info_popup("لا يوجد بيانات", "🚫 لا توجد مصاريف لهذا الشهر.")
+                return
+
+            # تجهيز البيانات
+            data = [["📅 التاريخ", "💶 المبلغ (€)"]]
+            total = 0.0
+            for date, amount in rows:
+                data.append([date, f"{amount:.2f}"])
+                total += amount
+
+            data.append(["", ""])
+            data.append(["📌 الإجمالي", f"{total:.2f} €"])
+
+            styles = getSampleStyleSheet()
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            doc = SimpleDocTemplate(temp_file.name, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+
+            elements = [
+                Paragraph(f"تقرير مصاريف الوقود – {driver_name} ({year_month})", styles["Title"]),
+                Spacer(1, 12),
+                Table(data, colWidths=[200, 150])
+            ]
+
+            elements[2].setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.gray),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("BACKGROUND", (0, 1), (-1, -2), colors.beige),
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ]))
+
+            doc.build(elements)
+            os.startfile(temp_file.name)
+
+        except Exception as e:
+            self.show_info_popup("خطأ", f"فشل إنشاء PDF:\n{e}")
+
     def _refresh_driver_comboboxes(self):
         """تحديث جميع القوائم المنسدلة التي تعرض أسماء السائقين"""
         drivers = self.get_driver_names()
@@ -3351,6 +3801,10 @@ class MedicalTransApp(tb.Window):
                 self.main_entries[2]['values'] = drivers
         except Exception:
             pass
+
+        # ✅ تحديث تبويب مصاريف الوقود
+        if hasattr(self, "fuel_driver_combo") and self.fuel_driver_combo.winfo_exists():
+            self.fuel_driver_combo['values'] = drivers
 
         # تحديث تبويب الإجازات إذا كان النوع "سائق"
         if hasattr(self, 'vac_name') and self.vac_type.get() == "سائق":
