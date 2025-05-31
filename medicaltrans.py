@@ -118,6 +118,8 @@ def setup_database():
 class MedicalTransApp(tb.Window):
     def __init__(self):
         super().__init__(themename="lumen")  # الوضع الافتراضي
+        style = ttk.Style()
+        style.configure("Treeview.Heading", background="#0d6efd", foreground="white", font=("Arial", 10, "bold"))
         self.title("Medicaltrans GmbH – إدارة النقل الطبي")
         self.geometry("1200x700")
         self.current_theme = "lumen"
@@ -382,7 +384,7 @@ class MedicalTransApp(tb.Window):
 
             vac_id, person_type, name, start_old, end_old = values
 
-            edit_win = self.center_window("✏️ تعديل الإجازة", 450, 300)
+            edit_win = self.build_centered_popup("✏️ تعديل الإجازة", 450, 300)
 
             main_frame = tb.Frame(edit_win)
             main_frame.pack(fill="both", expand=True, padx=15, pady=15)
@@ -845,8 +847,9 @@ class MedicalTransApp(tb.Window):
             for i, label in enumerate(column_labels):
                 col_id = f"#{i + 1}"
                 tree.heading(col_id, text=label)
-                if i == 0:
-                    tree.column(col_id, width=30, anchor="center", stretch=False)  # id مخفي أو صغير
+                if column_labels[i] == "":
+                    tree.column(col_id, width=0, anchor="center", stretch=False)
+                    tree.heading(col_id, text="")
                 else:
                     tree.column(col_id, width=default_col_width, anchor="center")
 
@@ -1035,15 +1038,13 @@ class MedicalTransApp(tb.Window):
         if mode == "current":
             table = self.vacation_tree
             title = "الإجازات الحالية"
-        else:
-            if not self.archived_vacations_window or not self.archived_vacations_window.winfo_exists():
-                return
-            table = self._find_treeview_in_window(self.archived_vacations_window)
-            if not table:
-                return
-            if not table:
+        elif mode == "archived":
+            table = getattr(self, "archived_vacation_tree", None)
+            if not table or not table.winfo_exists():
                 return
             title = "الإجازات المؤرشفة"
+        else:
+            return
 
         self.export_table_to_pdf(table, title)
 
@@ -1051,15 +1052,13 @@ class MedicalTransApp(tb.Window):
         if mode == "current":
             table = self.calendar_tree
             title = "الأحداث المجدولة"
-        else:
-            if not self.archived_calendar_window or not self.archived_calendar_window.winfo_exists():
-                return
-            table = self._find_treeview_in_window(self.archived_calendar_window)
-            if not table:
-                return
-            if not table:
+        elif mode == "archived":
+            table = getattr(self, "archived_calendar_tree", None)
+            if not table or not table.winfo_exists():
                 return
             title = "الأحداث المؤرشفة"
+        else:
+            return  # تجنب حالات غير معروفة
 
         self.export_table_to_pdf(table, title)
 
@@ -1381,6 +1380,8 @@ class MedicalTransApp(tb.Window):
         labels = ["", "رقم اللوحة", "Autobahn Pickerl من", "Autobahn Pickerl إلى", "Jährlich Pickerl حتى", "ملاحظات"]
 
         self.car_table = ttk.Treeview(tree_frame, columns=columns, show="headings", height=6)
+        self.car_table.column("id", width=0, stretch=False)
+        self.car_table.heading("id", text="")
         self.car_table.reload_callback = self._load_car_data
         self.car_table.pack(side="left", fill="both", expand=True)
 
@@ -1431,6 +1432,8 @@ class MedicalTransApp(tb.Window):
         ]
 
         win, tree, _ = self.build_centered_popup("📁 السيارات المؤرشفة", 1000, 500, columns, labels)
+        tree.column("id", width=0, stretch=False)
+        tree.heading("id", text="")
         tree.reload_callback = self._load_archived_cars
         self.archived_cars_window = win
 
@@ -2192,6 +2195,8 @@ class MedicalTransApp(tb.Window):
         ]
 
         self.driver_table = ttk.Treeview(tree_frame, columns=columns, show="headings", height=6)
+        self.driver_table.column("id", width=0, stretch=False)
+        self.driver_table.heading("id", text="")
         self.driver_table.reload_callback = self._load_driver_table_data
         self.driver_table.pack(side="left", fill="both", expand=True)
 
@@ -2911,6 +2916,8 @@ class MedicalTransApp(tb.Window):
 
         columns = ("id", "title", "description", "start", "end")
         self.calendar_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=5)
+        self.calendar_tree.column("id", width=0, stretch=False)
+        self.calendar_tree.heading("id", text="")
         self.calendar_tree.reload_callback = self._load_calendar_events
         self._load_calendar_events()  # تحميل البيانات الأصلية
         self.calendar_tree.pack(side="left", fill="both", expand=True)
@@ -2954,6 +2961,8 @@ class MedicalTransApp(tb.Window):
 
         columns = ("id", "person_type", "name", "start", "end")
         self.vacation_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=5)
+        self.vacation_tree.column("id", width=0, stretch=False)
+        self.vacation_tree.heading("id", text="")
         self.vacation_tree.pack(side="left", fill="both", expand=True)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.vacation_tree.yview)
@@ -3033,6 +3042,9 @@ class MedicalTransApp(tb.Window):
 
         # --- إنشاء النافذة والجدول ---
         win, tree, _ = self.build_centered_popup("📁 السائقين المؤرشفين", 1000, 500, columns, labels)
+        tree.column("id", width=0, stretch=False)
+        tree.heading("id", text="")
+
         self.archived_drivers_window = win
 
         # --- قسم التحكم السفلي ---
@@ -3187,7 +3199,9 @@ class MedicalTransApp(tb.Window):
         columns = ("id", "title", "description", "start", "end")
         labels = ["", "نوع الحدث", "الوصف", "من", "إلى"]
         win, tree, _ = self.build_centered_popup("📁 الأحداث المؤرشفة", 900, 500, columns, labels)
-        self.archived_calendar_window = win
+        tree.column("id", width=0, stretch=False)
+        tree.heading("id", text="")
+        self.archived_calendar_tree = tree
 
         # ===== السطر السفلي: مقسم لـ 3 أعمدة (يسار - وسط - يمين) =====
         bottom_controls = tb.Frame(win)
@@ -3210,7 +3224,6 @@ class MedicalTransApp(tb.Window):
         right_spacer.pack(side="left", expand=True)
 
         self._load_archived_calendar_events(tree)
-        self.archived_calendar_tree = tree
 
     def _toggle_archived_vacations_window(self):
         if self.archived_vacations_window and self.archived_vacations_window.winfo_exists():
@@ -3221,7 +3234,9 @@ class MedicalTransApp(tb.Window):
         columns = ("id", "person_type", "name", "start", "end")
         labels = ["", "النوع", "الاسم", "من", "إلى"]
         win, tree, _ = self.build_centered_popup("📁 الإجازات المؤرشفة", 900, 500, columns, labels)
-        self.archived_vacations_window = win
+        tree.column("id", width=0, stretch=False)
+        tree.heading("id", text="")
+        self.archived_vacation_tree = tree
 
         tree.reload_callback = self._load_archived_vacations
 
@@ -3252,12 +3267,10 @@ class MedicalTransApp(tb.Window):
             (today,)
         )
 
-        self.archived_vacations_tree = tree
-
     def _edit_calendar_event(self):
         self._current_event_id = None
 
-        edit_win = self.center_window("📝 تعديل الحدث", 550, 450)
+        edit_win = self.build_centered_popup("📝 تعديل الحدث", 550, 450)
         main_frame = tb.Frame(edit_win)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
@@ -4064,6 +4077,9 @@ class MedicalTransApp(tb.Window):
     def _show_archived_appointments_window(self):
         win, tree, _ = self.build_centered_popup("📁 المواعيد المؤرشفة", 700, 450, columns=("id", "car", "type", "date"),
                                                  column_labels=["", "رقم اللوحة", "نوع الموعد", "تاريخ الموعد"])
+        
+        tree.column("id", width=0, stretch=False)
+        tree.heading("id", text="")
 
         today = datetime.today().strftime("%Y-%m-%d")
         with sqlite3.connect("medicaltrans.db") as conn:
