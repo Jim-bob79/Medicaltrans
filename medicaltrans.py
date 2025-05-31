@@ -528,9 +528,12 @@ class MedicalTransApp(tb.Window):
             """, (date,))
             return c.fetchone() is not None
 
-    def show_info_popup(self, title, message):
+    def show_info_popup(self, title, message, parent=None):
         win_width = 700 if title == "معلومة" else 500
         win = self.build_centered_popup(title, win_width, 220)
+        if parent:
+            win.transient(parent)
+            win.lift(parent)
 
         frame = tb.Frame(win)
         frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -3627,11 +3630,11 @@ class MedicalTransApp(tb.Window):
                         """, (new_driver, new_date, new_amount, expense_id))
                         conn.commit()
 
-                    self.show_info_popup("✔️ تم", "✅ تم تعديل المصروف بنجاح.")
+                    # تحديث السطر مباشرة
+                    tree.item(selected[0], values=(new_driver, new_date, f"{new_amount:.2f}"))
+
                     edit_win.destroy()
-                    # إعادة تحميل جدول المصاريف بعد التعديل
-                    self._show_fuel_expense_table()
-                    # تحديث القوائم المنسدلة في حال تغير اسم السائق
+                    self.show_info_popup("✔️ تم", "✅ تم تعديل المصروف بنجاح.", parent=win)
                     self._refresh_driver_comboboxes()
                 except Exception as e:
                     self.show_info_popup("خطأ", f"فشل التعديل:\n{e}")
