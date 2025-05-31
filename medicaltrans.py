@@ -2123,7 +2123,7 @@ class MedicalTransApp(tb.Window):
         car_label_frame = tb.Frame(form_frame)
         car_label_frame.grid(row=4, column=0, sticky="e", pady=5, padx=(10, 5))
         ttk.Label(car_label_frame, text="السيارة (رقم اللوحة):").pack(side="left")
-        ttk.Label(car_label_frame, text="*", foreground="red").pack(side="left", padx=(2, 0))
+        ttk.Label(car_label_frame, text=" ", foreground="red").pack(side="left", padx=(2, 0))
 
         car_frame = tb.Frame(form_frame)
         car_frame.grid(row=4, column=1, sticky="w", pady=5)
@@ -2139,7 +2139,7 @@ class MedicalTransApp(tb.Window):
         from_label_frame = tb.Frame(car_frame)
         from_label_frame.pack(side="left", padx=(5, 2))
         ttk.Label(from_label_frame, text="من:").pack(side="left")
-        ttk.Label(from_label_frame, text="*", foreground="red").pack(side="left", padx=(2, 0))
+        # ttk.Label(from_label_frame, text="*", foreground="red").pack(side="left", padx=(2, 0))
 
         self.driver_car_from_picker = CustomDatePicker(car_frame)
         self.driver_car_from_picker.pack(side="left", padx=(0, 5))
@@ -3537,7 +3537,35 @@ class MedicalTransApp(tb.Window):
         ttk.Button(bottom_frame, text="🖨️ طباعة", style="info.TButton",
                    command=lambda: self.export_table_to_pdf(tree, "تقرير مصاريف الوقود")).pack(side="left", padx=10)
 
-        # زر تعديل جديد بجانب الطباعة
+        # تحميل بيانات جدول الوقود عند الفتح أو التحديث
+        def load_all_fuel_expenses():
+            try:
+                with sqlite3.connect("medicaltrans.db") as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT driver_name, date, amount FROM fuel_expenses ORDER BY date ASC")
+                    rows = c.fetchall()
+            except Exception as e:
+                self.show_info_popup("خطأ", f"تعذر تحميل بيانات المصاريف:\n{e}", parent=win)
+                return
+
+            tree.delete(*tree.get_children())
+            total = 0.0
+            for i, row in enumerate(rows):
+                tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+                try:
+                    amount_val = float(row[2])
+                    total += amount_val
+                    amount_str = f"{amount_val:.2f}"
+                except Exception:
+                    amount_str = "غير صالح"
+                tree.insert("", "end", values=(row[0], row[1], amount_str), tags=(tag,))
+
+            tree.insert("", "end", values=("", "📌 الإجمالي", f"{total:.2f}"), tags=("total",))
+            tree.tag_configure("total", background="#e6e6e6", font=("Helvetica", 10, "bold"))
+            self.apply_alternate_row_colors(tree)
+
+        load_all_fuel_expenses()
+
         def open_edit_popup():
             selected = tree.selection()
             if not selected:
@@ -3553,24 +3581,20 @@ class MedicalTransApp(tb.Window):
             old_date = values[1].strip()
             old_amount = values[2].strip()
 
-            # نافذة التعديل
             edit_win = self.build_centered_popup("📝 تعديل مصروف الوقود", 400, 260)
             frm = tb.Frame(edit_win, padding=20)
             frm.pack(fill="both", expand=True)
 
-            # اسم السائق (قابل للتعديل)
             ttk.Label(frm, text="اسم السائق:").pack(anchor="w")
             driver_entry = ttk.Combobox(frm, values=self.get_driver_names(), width=30)
             driver_entry.set(old_driver)
             driver_entry.pack(anchor="w", pady=5)
 
-            # التاريخ
             ttk.Label(frm, text="التاريخ:").pack(anchor="w")
             date_picker = CustomDatePicker(frm)
             date_picker.set(old_date)
             date_picker.pack(anchor="w", pady=5)
 
-            # المبلغ
             ttk.Label(frm, text="المبلغ (€):").pack(anchor="w")
             amount_entry = tb.Entry(frm)
             amount_entry.insert(0, old_amount)
@@ -3597,12 +3621,9 @@ class MedicalTransApp(tb.Window):
                     self.show_info_popup("خطأ", "المبلغ القديم غير صالح.")
                     return
 
-                # تحديث قاعدة البيانات
                 try:
                     with sqlite3.connect("medicaltrans.db") as conn:
                         c = conn.cursor()
-                        # زيادة الدقة: استخدم float(old_amount)
-                        old_amount_val = float(old_amount)
                         c.execute("""
                             SELECT id FROM fuel_expenses
                             WHERE driver_name = ? AND date = ? AND amount = ?
@@ -3621,12 +3642,11 @@ class MedicalTransApp(tb.Window):
                         """, (new_driver, new_date, new_amount, expense_id))
                         conn.commit()
 
-                    # تحديث السطر مباشرة
-                    tree.item(selected[0], values=(new_driver, new_date, f"{new_amount:.2f}"))
-
                     edit_win.destroy()
                     self.show_info_popup("✔️ تم", "✅ تم تعديل المصروف بنجاح.", parent=win)
-                    self._refresh_driver_comboboxes()
+                    if hasattr(self, '_refresh_driver_comboboxes'):
+                        self._refresh_driver_comboboxes()
+                    load_all_fuel_expenses()  # تحديث الجدول بعد التعديل مباشرة
                 except Exception as e:
                     self.show_info_popup("خطأ", f"فشل التعديل:\n{e}")
 
