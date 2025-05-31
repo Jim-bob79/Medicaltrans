@@ -668,6 +668,10 @@ class MedicalTransApp(tb.Window):
         tree.tag_configure('oddrow', background=odd_color)
 
         for i, item in enumerate(tree.get_children()):
+            # تجاهل صف الإجمالي (المجموع) إذا كان عليه tag "total"
+            tags = tree.item(item, "tags")
+            if "total" in tags:
+                continue
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
             tree.item(item, tags=(tag,))
 
@@ -3492,7 +3496,8 @@ class MedicalTransApp(tb.Window):
             self.show_info_popup("خطأ", f"فشل الحفظ:\n{e}")
 
     def _show_fuel_expense_table(self):
-        win, tree, bottom_frame = self.build_centered_popup("📊 مصاريف الوقود", 850, 500,
+        win, tree, bottom_frame = self.build_centered_popup(
+            "📊 مصاريف الوقود", 850, 500,
             columns=("driver", "date", "amount"),
             column_labels=["اسم السائق", "تاريخ الدفع", "المبلغ (€)"]
         )
@@ -3500,10 +3505,10 @@ class MedicalTransApp(tb.Window):
         filter_frame = tb.Frame(win)
         filter_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-        # سائق محدد (أو الكل)
-        ttk.Label(filter_frame, text="السائق:").pack(side="left", padx=(0, 5))
-        driver_filter_combo = ttk.Combobox(filter_frame, values=self.get_driver_names(), width=20, state="readonly")
-        self.current_driver_filter_combo = driver_filter_combo
+        # قائمة السائقين مع "🔄 الكل"
+        driver_names = ["🔄 الكل"] + self.get_driver_names()
+        driver_filter_combo = ttk.Combobox(filter_frame, values=driver_names, width=20, state="readonly")
+        driver_filter_combo.set("🔄 الكل")
         driver_filter_combo.pack(side="left", padx=(0, 15))
 
         # من تاريخ
@@ -3516,38 +3521,17 @@ class MedicalTransApp(tb.Window):
         to_picker = CustomDatePicker(filter_frame)
         to_picker.pack(side="left", padx=(0, 10))
 
-        # زر التصفية
+        # زر الفلترة
         def apply_filter():
-            name = driver_filter_combo.get().strip()
-            start = from_picker.get().strip()
-            end = to_picker.get().strip()
-            self._show_filtered_fuel_expenses(name, start, end)
+            selected_driver = driver_filter_combo.get()
+            driver_name = None if selected_driver == "🔄 الكل" else selected_driver
+            from_date = from_picker.get().strip()
+            to_date = to_picker.get().strip()
+            self._show_filtered_fuel_expenses(driver_name, from_date, to_date)
 
-        ttk.Button(filter_frame, text="🔍 تطبيق الفلتر", style="info.TButton", command=apply_filter).pack(side="left", padx=(10, 0))
-
-        try:
-            conn = sqlite3.connect("medicaltrans.db")
-            c = conn.cursor()
-            c.execute("""
-                SELECT driver_name, date, amount FROM fuel_expenses
-                ORDER BY date ASC
-            """)
-            rows = c.fetchall()
-            conn.close()
-        except Exception as e:
-            self.show_info_popup("خطأ", f"فشل تحميل البيانات:\n{e}")
-            return
-
-        # تعبئة الجدول
-        tree._original_items = []
-        tree.delete(*tree.get_children())
-
-        for i, (driver, date_str, amount) in enumerate(rows):
-            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
-            tree.insert("", "end", values=(driver, date_str, f"{amount:.2f}"), tags=(tag,))
-            tree._original_items.append([driver, date_str, f"{amount:.2f}"])
-
-        self.apply_alternate_row_colors(tree)
+        ttk.Button(
+            filter_frame, text="🔍 تطبيق الفلتر", style="info.TButton", command=apply_filter
+        ).pack(side="left", padx=(10, 0))
 
         # زر طباعة
         ttk.Button(bottom_frame, text="🖨️ طباعة", style="info.TButton",
@@ -3607,16 +3591,23 @@ class MedicalTransApp(tb.Window):
                     self.show_info_popup("تنبيه", "يرجى إدخال اسم السائق والتاريخ.")
                     return
 
+                try:
+                    old_amount_val = float(old_amount)
+                except:
+                    self.show_info_popup("خطأ", "المبلغ القديم غير صالح.")
+                    return
+
                 # تحديث قاعدة البيانات
                 try:
                     with sqlite3.connect("medicaltrans.db") as conn:
                         c = conn.cursor()
-                        # التحقق من وجود السجل القديم بدقة (سائق، تاريخ، مبلغ)
+                        # زيادة الدقة: استخدم float(old_amount)
+                        old_amount_val = float(old_amount)
                         c.execute("""
                             SELECT id FROM fuel_expenses
                             WHERE driver_name = ? AND date = ? AND amount = ?
                             LIMIT 1
-                        """, (old_driver, old_date, old_amount))
+                        """, (old_driver, old_date, old_amount_val))
                         row = c.fetchone()
                         if not row:
                             self.show_info_popup("خطأ", "لم يتم العثور على السجل الأصلي.")
@@ -3724,12 +3715,22 @@ class MedicalTransApp(tb.Window):
 
         query += " ORDER BY date ASC"
 
-        with sqlite3.connect("medicaltrans.db") as conn:
-            c = conn.cursor()
-            c.execute(query, tuple(params))
-            rows = c.fetchall()
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute(query, tuple(params))
+                rows = c.fetchall()
+        except Exception as e:
+            self.show_info_popup("خطأ", f"حدث خطأ أثناء جلب البيانات:\n{e}", parent=win)
+            win.destroy()
+            return
 
-        tree._original_items = rows
+        if not rows:
+            self.show_info_popup("🚫 لا توجد بيانات", "لا توجد مصاريف مطابقة للفلتر.", parent=win)
+            win.destroy()
+            return
+
+        tree._original_items = []
         tree.delete(*tree.get_children())
 
         total = 0.0  # ← جمع المبالغ
