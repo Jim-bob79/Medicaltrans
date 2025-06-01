@@ -907,6 +907,87 @@ class MedicalTransApp(tb.Window):
         window.protocol("WM_DELETE_WINDOW", on_close)
         return window
 
+    def build_table_window_with_search(
+        self,
+        title: str,
+        width: int,
+        height: int,
+        columns: list,
+        column_labels: list,
+        reload_callback: callable,
+        export_title: str = "",
+        extra_buttons: list = None  # [(label, command, style), ...]
+    ):
+        """
+        ينشئ نافذة منبثقة تحتوي على جدول منسق مع شريط بحث وأزرار متمركزة.
+
+        1. النافذة متمركزة باستخدام build_centered_popup.
+        2. يتم إنشاء Treeview يدويًا مع Scrollbar أنيق style="TScrollbar".
+        3. يتم إخفاء عمود ID تلقائيًا إن كان label == "".
+        4. يتم توزيع الأعمدة بالتساوي باستخدام configure_tree_columns.
+        5. يتم تطبيق ألوان صفوف متناوبة باستخدام apply_alternate_row_colors.
+        6. يتم إنشاء قسم سفلي بـ 3 أجزاء:
+            - search_frame على اليسار.
+            - center_buttons في المنتصف.
+            - right_spacer لموازنة التمركز.
+        7. يتم وضع زر إغلاق أحمر بشكل افتراضي.
+        8. يمكن إضافة أزرار إضافية عبر extra_buttons.
+        9. يتم تحميل البيانات باستخدام reload_callback.
+        """
+
+        # نافذة متمركزة
+        win = self.build_centered_popup(title, width, height)
+    
+        # ==== إطار الجدول ====
+        table_frame = tb.Frame(win)
+        table_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
+        tree.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview, style="TScrollbar")
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        # توزيع الأعمدة + إخفاء ID + محاذاة وسط
+        self.configure_tree_columns(tree, column_labels)
+
+        # ألوان صفوف بالتناوب
+        self.apply_alternate_row_colors(tree)
+
+        # ==== القسم السفلي بثلاثة أجزاء ====
+        bottom_controls = tb.Frame(win)
+        bottom_controls.pack(fill="x", pady=10, padx=10)
+
+        # يسار: حقل البحث
+        search_frame = tb.Frame(bottom_controls)
+        search_frame.pack(side="left")
+        self.attach_search_filter(search_frame, tree, query_callback=reload_callback)
+
+        # وسط: الأزرار المتمركزة
+        center_buttons = tb.Frame(bottom_controls)
+        center_buttons.pack(side="left", expand=True)
+
+        if export_title:
+            ttk.Button(center_buttons, text="🖨️ طباعة", style="info.TButton",
+                       command=lambda: self.export_table_to_pdf(tree, export_title)).pack(side="left", padx=10)
+
+        # أزرار إضافية إن وجدت
+        if extra_buttons:
+            for label, command, style in extra_buttons:
+                ttk.Button(center_buttons, text=label, style=style, command=command).pack(side="left", padx=10)
+
+        # زر إغلاق أحمر دائمًا
+        ttk.Button(center_buttons, text="❌ إغلاق", style="danger.TButton", command=win.destroy).pack(side="left", padx=10)
+
+        # يمين: فراغ موازن
+        right_spacer = tb.Frame(bottom_controls)
+        right_spacer.pack(side="left", expand=True)
+
+        # تحميل البيانات
+        reload_callback(tree)
+        tree.event_generate("<<TreeviewSelect>>")
+
     def on_archive_close(self, window):
         window.destroy()
         self._load_car_data()  # أو أي دالة تحديث للجدول الرئيسي
@@ -1976,23 +2057,28 @@ class MedicalTransApp(tb.Window):
         self.fill_treeview_with_rows(self.driver_table, rows)
 
     def _load_archived_drivers(self, tree):
-        with sqlite3.connect("medicaltrans.db") as conn:
-            c = conn.cursor()
-            c.execute("""
-                SELECT id, name, address, phone,
-                       car_received_date, employment_end_date, issues
-                FROM drivers
-                WHERE employment_end_date IS NOT NULL
-                  AND employment_end_date != ''
-                  AND date(employment_end_date) <= date('now')
-                ORDER BY employment_end_date DESC
-            """)
-            rows = c.fetchall()
+        conn = sqlite3.connect("medicaltrans.db")
+        c = conn.cursor()
 
-        # إفراغ الجدول ثم تعبئته
+        c.execute("""
+            SELECT id, name, address, phone, car_received_date, employment_end_date, issues
+            FROM archived_drivers
+            ORDER BY employment_end_date DESC
+        """)
+
+        rows = c.fetchall()
+        conn.close()
+
+        # تخزين البيانات الأصلية للتصفية
+        tree._original_items = rows
+
+        # تعبئة الجدول
         tree.delete(*tree.get_children())
-        for row in rows:
-            tree.insert("", "end", values=row)
+        for i, row in enumerate(rows):
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            tree.insert("", "end", values=row, tags=(tag,))
+
+        self.apply_alternate_row_colors(tree)
 
     def _load_archived_cars(self):
         today = datetime.today().strftime("%Y-%m-%d")
@@ -3035,39 +3121,21 @@ class MedicalTransApp(tb.Window):
             self.archived_drivers_window = None
             return
 
-        # --- الأعمدة والعناوين ---
         columns = ("id", "name", "address", "phone", "car_received_date", "employment_end_date", "issues")
         labels = ["", "اسم السائق", "العنوان", "الهاتف", "من", "إلى", "ملاحظات"]
 
-        # --- إنشاء النافذة والجدول ---
-        win, tree, _ = self.build_centered_popup("📁 السائقين المؤرشفين", 1000, 500, columns, labels)
-        tree.column("id", width=0, stretch=False)
-        tree.heading("id", text="")
+        self.build_table_window_with_search(
+            title="📁 السائقين المؤرشفين",
+            width=1000,
+            height=500,
+            columns=columns,
+            column_labels=labels,
+            reload_callback=self._load_archived_drivers,
+            export_title="السائقين المؤرشفين"
+        )
 
-        self.archived_drivers_window = win
-
-        # --- قسم التحكم السفلي ---
-        bottom_controls = tb.Frame(win)
-        bottom_controls.pack(fill="x", pady=10, padx=10)
-
-        # --- يسار: حقل البحث ---
-        search_frame = tb.Frame(bottom_controls)
-        search_frame.pack(side="left")
-        self.attach_search_filter(search_frame, tree, query_callback=self._load_archived_drivers)
-
-        # --- وسط: الأزرار ---
-        center_buttons = tb.Frame(bottom_controls)
-        center_buttons.pack(side="left", expand=True)
-
-        ttk.Button(center_buttons, text="🖨️ طباعة", command=lambda: self.export_table_to_pdf(tree, "السائقين المؤرشفين")).pack(side="left", padx=10)
-        ttk.Button(center_buttons, text="❌ إغلاق", command=win.destroy).pack(side="left", padx=10)
-
-        # --- يمين: فاصل للتوسيط ---
-        right_spacer = tb.Frame(bottom_controls)
-        right_spacer.pack(side="left", expand=True)
-
-        # --- تحميل البيانات ---
-        self._load_archived_drivers(tree)
+        # تخزين مرجع النافذة (لأغراض الغلق لاحقًا)
+        self.archived_drivers_window = self.winfo_children()[-1]
 
     def _toggle_driver_car_assignments_archive(self):
         if hasattr(self, 'archived_driver_car_window') and self.archived_driver_car_window.winfo_exists():
@@ -3075,6 +3143,7 @@ class MedicalTransApp(tb.Window):
             self.archived_driver_car_window = None
             return
 
+        # تعيين الأعمدة والعناوين
         columns = (
             "id", "driver_id", "driver_name", "assigned_plate",
             "plate_from", "plate_to", "archived_at"
@@ -3084,44 +3153,19 @@ class MedicalTransApp(tb.Window):
             "من", "إلى", "تاريخ الأرشفة"
         ]
 
-        win = tb.Toplevel(self)
-        win.title("📁 أرشيف قيادة السيارات")
-        win.geometry("1000x500")
-        self.archived_driver_car_window = win
+        # نافذة موحدة عبر الدالة الجديدة
+        self.build_table_window_with_search(
+            title="📁 أرشيف قيادة السيارات",
+            width=1000,
+            height=500,
+            columns=columns,
+            column_labels=labels,
+            reload_callback=self._load_driver_car_archive,
+            export_title="أرشيف قيادة السيارات"
+        )
 
-        # ==== إطار الجدول ====
-        table_frame = tb.Frame(win)
-        table_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
-
-        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
-        tree.pack(side="left", fill="both", expand=True)
-
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview, style="TScrollbar")
-        tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-
-        self.configure_tree_columns(tree, labels)
-        self.apply_alternate_row_colors(tree)
-
-        # ==== قسم التحكم السفلي ====
-        bottom_controls = tb.Frame(win)
-        bottom_controls.pack(fill="x", pady=10, padx=10)
-
-        # حقل البحث في اليسار
-        search_frame = tb.Frame(bottom_controls)
-        search_frame.pack(side="left")
-        self.attach_search_filter(search_frame, tree, query_callback=self._load_driver_car_archive)
-
-        # الأزرار في المنتصف
-        center_buttons = tb.Frame(bottom_controls)
-        center_buttons.pack(side="left", expand=True)
-
-        ttk.Button(center_buttons, text="🖨️ طباعة", style="info.TButton",
-                   command=lambda: self.export_table_to_pdf(tree, "أرشيف قيادة السيارات")).pack(side="left", padx=10)
-        ttk.Button(center_buttons, text="❌ إغلاق", style="danger.TButton", command=win.destroy).pack(side="left", padx=10)
-
-        # تحميل البيانات
-        self._load_driver_car_archive(tree)
+        # تخزين مرجع النافذة (مطلوب لإغلاقها لاحقًا)
+        self.archived_driver_car_window = self.winfo_children()[-1]
 
     def _load_driver_car_archive(self, treeview=None):
         tree = treeview or getattr(self, 'archived_driver_car_tree', None)
