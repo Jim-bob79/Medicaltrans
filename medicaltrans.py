@@ -118,12 +118,11 @@ def setup_database():
 class MedicalTransApp(tb.Window):
     def __init__(self):
         super().__init__(themename="lumen")  # الوضع الافتراضي
-        style = ttk.Style()
-        style.configure("Treeview.Heading", background="#0d6efd", foreground="white", font=("Arial", 10, "bold"))
+
         self.title("Medicaltrans GmbH – إدارة النقل الطبي")
         self.geometry("1200x700")
         self.current_theme = "lumen"
-        
+    
         self._setup_custom_styles()
         self._build_header()
         self._build_layout()
@@ -2189,20 +2188,20 @@ class MedicalTransApp(tb.Window):
         labels = [
             "", "اسم السائق", "العنوان", "الهاتف",
             "من", "إلى",
-                "نوع العقد",
-                "رقم اللوحة", "تاريخ استلام السيارة", "تاريخ تسليم السيارة",
-                "ملاحظات"
+            "نوع العقد",
+            "رقم اللوحة", "تاريخ استلام السيارة", "تاريخ تسليم السيارة",
+            "ملاحظات"
         ]
 
         self.driver_table = ttk.Treeview(tree_frame, columns=columns, show="headings", height=6)
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.driver_table.yview, style="TScrollbar")
+        self.driver_table.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
         self.driver_table.column("id", width=0, stretch=False)
         self.driver_table.heading("id", text="")
         self.driver_table.reload_callback = self._load_driver_table_data
         self.driver_table.pack(side="left", fill="both", expand=True)
-
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.driver_table.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.driver_table.xview)
-        self.setup_tree_scrollbars(self.driver_table, vsb, hsb)
 
         self.configure_tree_columns(self.driver_table, labels)
         self.apply_alternate_row_colors(self.driver_table)
@@ -3081,39 +3080,47 @@ class MedicalTransApp(tb.Window):
             "plate_from", "plate_to", "archived_at"
         )
         labels = [
-            "", "معرّف السائق", "اسم السائق", "رقم اللوحة",
+            "", "", "اسم السائق", "رقم اللوحة",
             "من", "إلى", "تاريخ الأرشفة"
         ]
 
-        win, tree, _ = self.build_centered_popup("📁 أرشيف قيادة السيارات", 1000, 500, columns, labels)
+        win = tb.Toplevel(self)
+        win.title("📁 أرشيف قيادة السيارات")
+        win.geometry("1000x500")
         self.archived_driver_car_window = win
 
-        # ✅ إخفاء العمود "معرّف السائق"
-        tree.column("driver_id", width=0, stretch=False)
-        tree.heading("driver_id", text="")
+        # ==== إطار الجدول ====
+        table_frame = tb.Frame(win)
+        table_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-        # يمكن أيضًا إخفاء id إن لم يكن مفيدًا
-        tree.column("id", width=0, stretch=False)
-        tree.heading("id", text="")
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        tree.pack(side="left", fill="both", expand=True)
 
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview, style="TScrollbar")
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        self.configure_tree_columns(tree, labels)
+        self.apply_alternate_row_colors(tree)
+
+        # ==== قسم التحكم السفلي ====
         bottom_controls = tb.Frame(win)
         bottom_controls.pack(fill="x", pady=10, padx=10)
 
-        # 1. يسار - حقل البحث
+        # حقل البحث في اليسار
         search_frame = tb.Frame(bottom_controls)
         search_frame.pack(side="left")
         self.attach_search_filter(search_frame, tree, query_callback=self._load_driver_car_archive)
 
-        # 2. وسط - الأزرار
+        # الأزرار في المنتصف
         center_buttons = tb.Frame(bottom_controls)
         center_buttons.pack(side="left", expand=True)
 
-        ttk.Button(center_buttons, text="🖨️ طباعة", command=lambda: self.export_table_to_pdf(tree, "أرشيف قيادة السيارات")).pack(side="left", padx=10)
-        ttk.Button(center_buttons, text="❌ إغلاق", command=win.destroy).pack(side="left", padx=10)
+        ttk.Button(center_buttons, text="🖨️ طباعة", style="info.TButton",
+                   command=lambda: self.export_table_to_pdf(tree, "أرشيف قيادة السيارات")).pack(side="left", padx=10)
+        ttk.Button(center_buttons, text="❌ إغلاق", style="danger.TButton", command=win.destroy).pack(side="left", padx=10)
 
-        right_spacer = tb.Frame(bottom_controls)
-        right_spacer.pack(side="left", expand=True)
-
+        # تحميل البيانات
         self._load_driver_car_archive(tree)
 
     def _load_driver_car_archive(self, treeview=None):
@@ -3509,14 +3516,48 @@ class MedicalTransApp(tb.Window):
             self.show_info_popup("خطأ", f"فشل الحفظ:\n{e}")
 
     def _show_fuel_expense_table(self):
-        win, tree, bottom_frame = self.build_centered_popup(
-            "📊 مصاريف الوقود", 850, 500,
-            columns=("driver", "date", "amount"),
-            column_labels=["اسم السائق", "تاريخ الدفع", "المبلغ (€)"]
-        )
+        win = tb.Toplevel(self)
+        win.title("📊 مصاريف الوقود")
+        win.transient(self)
+        win.grab_set()
+        win.focus_set()
+        win.update_idletasks()
 
+        # أبعاد النافذة الفرعية
+        win_w, win_h = 850, 500
+
+        # أبعاد وموقع نافذة البرنامج الرئيسية
+        self.update_idletasks()
+        parent_x = self.winfo_rootx()
+        parent_y = self.winfo_rooty()
+        parent_w = self.winfo_width()
+        parent_h = self.winfo_height()
+
+        # حساب التمركز داخل نافذة البرنامج
+        x = parent_x + (parent_w - win_w) // 2
+        y = parent_y + (parent_h - win_h) // 2
+
+        win.geometry(f"{win_w}x{win_h}+{x}+{y}")
+
+        columns = ("driver", "date", "amount")
+        labels = ["اسم السائق", "تاريخ الدفع", "المبلغ (€)"]
+
+        # ==== إطار الجدول ====
+        outer_frame = tb.Frame(win)
+        outer_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        tree = ttk.Treeview(outer_frame, columns=columns, show="headings", height=10)
+        tree.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(outer_frame, orient="vertical", command=tree.yview, style="TScrollbar")
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        self.configure_tree_columns(tree, labels)
+
+        # ==== إطار الفلاتر ====
         filter_frame = tb.Frame(win)
-        filter_frame.pack(fill="x", padx=10, pady=(0, 10))
+        filter_frame.pack(fill="x", padx=10, pady=(10, 0))
 
         # قائمة السائقين مع "🔄 الكل"
         driver_names = ["🔄 الكل"] + self.get_driver_names()
@@ -3524,17 +3565,14 @@ class MedicalTransApp(tb.Window):
         driver_filter_combo.set("🔄 الكل")
         driver_filter_combo.pack(side="left", padx=(0, 15))
 
-        # من تاريخ
         ttk.Label(filter_frame, text="من:").pack(side="left")
         from_picker = CustomDatePicker(filter_frame)
         from_picker.pack(side="left", padx=(0, 10))
 
-        # إلى تاريخ
         ttk.Label(filter_frame, text="إلى:").pack(side="left")
         to_picker = CustomDatePicker(filter_frame)
         to_picker.pack(side="left", padx=(0, 10))
 
-        # زر الفلترة
         def apply_filter():
             selected_driver = driver_filter_combo.get()
             driver_name = None if selected_driver == "🔄 الكل" else selected_driver
@@ -3542,15 +3580,21 @@ class MedicalTransApp(tb.Window):
             to_date = to_picker.get().strip()
             self._show_filtered_fuel_expenses(driver_name, from_date, to_date)
 
-        ttk.Button(
-            filter_frame, text="🔍 تطبيق الفلتر", style="info.TButton", command=apply_filter
-        ).pack(side="left", padx=(10, 0))
+        ttk.Button(filter_frame, text="🔍 تطبيق الفلتر", style="info.TButton", command=apply_filter).pack(side="left", padx=(10, 0))
 
-        # زر طباعة
-        ttk.Button(bottom_frame, text="🖨️ طباعة", style="info.TButton",
+        # ==== أزرار أسفل الجدول ====
+        bottom_controls = tb.Frame(win)
+        bottom_controls.pack(fill="x", pady=15)
+
+        center_buttons = tb.Frame(bottom_controls)
+        center_buttons.pack(anchor="center")
+
+        ttk.Button(center_buttons, text="🖨️ طباعة", style="info.TButton",
                    command=lambda: self.export_table_to_pdf(tree, "تقرير مصاريف الوقود")).pack(side="left", padx=10)
 
-        # تحميل بيانات جدول الوقود عند الفتح أو التحديث
+        ttk.Button(center_buttons, text="❌ إغلاق", style="danger.TButton", command=win.destroy).pack(side="left", padx=10)
+
+        # ==== تحميل البيانات ====
         def load_all_fuel_expenses():
             try:
                 with sqlite3.connect("medicaltrans.db") as conn:
@@ -3668,7 +3712,7 @@ class MedicalTransApp(tb.Window):
             ttk.Button(btns, text="💾 حفظ", style="Green.TButton", command=save_edit).pack(side="left", padx=10, ipadx=15)
             ttk.Button(btns, text="❌ إلغاء", style="Orange.TButton", command=edit_win.destroy).pack(side="left", padx=10, ipadx=15)
 
-        ttk.Button(bottom_frame, text="✏️ تعديل", style="Purple.TButton", command=open_edit_popup).pack(side="left", padx=10)
+        ttk.Button(center_buttons, text="✏️ تعديل", style="Purple.TButton", command=open_edit_popup).pack(side="left", padx=10)
 
     def _edit_fuel_expense_popup(self, driver_name, year_month):
         win, tree, bottom_frame = self.build_centered_popup(
