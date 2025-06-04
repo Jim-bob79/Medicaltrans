@@ -98,6 +98,11 @@ def setup_database():
             person_type TEXT, name TEXT,
             start_date TEXT, end_date TEXT)""")
 
+        try:
+            c.execute("ALTER TABLE vacations ADD COLUMN notes TEXT")
+        except sqlite3.OperationalError:
+            pass
+
         c.execute("""CREATE TABLE IF NOT EXISTS archived_car_appointments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             license_plate TEXT,
@@ -740,13 +745,28 @@ class MedicalTransApp(tb.Window):
         headers = [treeview.heading(col)["text"] for col in treeview["columns"] if col not in excluded_columns]
         data = [headers]
 
-        # استخراج صفوف البيانات مع استثناء الأعمدة
+        # استخراج صفوف البيانات مع التفاف ملاحظات
+        styles = getSampleStyleSheet()
+        normal_style = styles["Normal"]
+
+        columns = treeview["columns"]
         for item in items:
             row = treeview.item(item)["values"]
-            filtered_row = [cell for i, cell in enumerate(row) if treeview["columns"][i] not in excluded_columns]
+            filtered_row = []
+
+            for i, cell in enumerate(row):
+                col_name = columns[i]
+                if col_name in excluded_columns:
+                    continue
+
+                # إذا كانت الخلية هي حقل "ملاحظات" أو طويلة، حولها إلى Paragraph
+                if isinstance(cell, str) and (col_name == "notes" or len(cell) > 50):
+                    filtered_row.append(Paragraph(cell.replace("\n", "<br/>"), normal_style))
+                else:
+                    filtered_row.append(cell)
+
             data.append(filtered_row)
 
-        styles = getSampleStyleSheet()
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         doc = SimpleDocTemplate(temp_file.name, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
         elements = []
@@ -2631,8 +2651,8 @@ class MedicalTransApp(tb.Window):
                     new_plate or None,
                     new_plate_from or None,
                     new_plate_to or None,
-                    new_data[5],      # الملاحظات (وليس new_data[4])
-                    new_data[4],      # نوع العقد (وليس new_data[3])
+                    new_data[4],      # الملاحظات (وليس new_data[4])
+                    new_data[3],      # نوع العقد (وليس new_data[3])
                     driver_id
                 ))
                 conn.commit()
@@ -2837,52 +2857,68 @@ class MedicalTransApp(tb.Window):
     def _build_calendar_tab(self):
         frame = tb.Frame(self.content_frame, padding=20)
 
-        # ===== قسم إضافة حدث تقويم =====
-        calendar_event_frame = tb.LabelFrame(frame, text="إضافة حدث تقويمي", padding=10)
-        calendar_event_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        # ===== صف علوي يحتوي على: إضافة حدث تقويمي + إضافة إجازة =====
+        top_row = tb.Frame(frame)
+        top_row.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        top_row.columnconfigure(0, weight=1)
+        top_row.columnconfigure(1, weight=1)
+        top_row.rowconfigure(0, weight=1)
 
-        # نوع الحدث أو العطلة + الوصف / الملاحظات
+        # ===== إطار إضافة حدث تقويمي =====
+        calendar_event_frame = tb.LabelFrame(top_row, text="إضافة حدث تقويمي", padding=10)
+        calendar_event_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+
+        # === السطر الأول: نوع الحدث + التواريخ ===
         row0_frame = tb.Frame(calendar_event_frame)
         row0_frame.pack(fill="x", pady=5)
 
+        # نوع الحدث
         ttk.Label(row0_frame, text="نوع الحدث أو العطلة:").pack(side="left", padx=(5, 5))
         self.event_type_combo = ttk.Combobox(row0_frame, values=AUSTRIAN_HOLIDAYS, state="readonly", width=30, justify="left")
         self.event_type_combo.pack(side="left", padx=(0, 15))
 
-        ttk.Label(row0_frame, text="الوصف / الملاحظات:").pack(side="left", padx=(20, 5))
-        self.event_desc_text = tb.Text(row0_frame, width=60, height=3, wrap="word")
-        self.event_desc_text.pack(side="left", padx=(0, 10))
+        # من
+        ttk.Label(row0_frame, text="من:").pack(side="left", padx=(5, 2))
+        self.start_date_entry = CustomDatePicker(row0_frame)
+        self.start_date_entry.entry.configure(justify="left")
+        self.start_date_entry.pack(side="left", padx=(0, 10))
+
+        # إلى
+        ttk.Label(row0_frame, text="إلى:").pack(side="left", padx=(5, 2))
+        self.end_date_entry = CustomDatePicker(row0_frame)
+        self.end_date_entry.entry.configure(justify="left")
+        self.end_date_entry.pack(side="left", padx=(0, 10))
+
+        # === السطر الثاني: الوصف / الملاحظات ===
+        row1_frame = tb.Frame(calendar_event_frame)
+        row1_frame.pack(fill="x", pady=5)
+
+        ttk.Label(row1_frame, text="الوصف / الملاحظات:").grid(row=0, column=0, sticky="nw", padx=(5, 5), pady=(2, 0))
+        self.event_desc_text = tb.Text(row1_frame, width=91, height=3, wrap="word")
+        self.event_desc_text.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+
+        # row1_frame.columnconfigure(1, weight=1)  # للسماح بتمدد مربع النص
+
         self.event_desc_text.tag_configure("left", justify="left")
         self.event_desc_text.insert("1.0", "")
         self.event_desc_text.tag_add("left", "1.0", "end")
 
-        # صف التاريخ من - إلى + زر الحفظ
-        row1_frame = tb.Frame(calendar_event_frame)
-        row1_frame.pack(fill="x", pady=10)
-
-        ttk.Label(row1_frame, text="من:").pack(side="left", padx=(5, 2))
-        self.start_date_entry = CustomDatePicker(row1_frame)
-        self.start_date_entry.entry.configure(justify="left")
-        self.start_date_entry.pack(side="left", padx=(0, 10))
-
-        ttk.Label(row1_frame, text="إلى:").pack(side="left", padx=(5, 2))
-        self.end_date_entry = CustomDatePicker(row1_frame)
-        self.end_date_entry.entry.configure(justify="left")
-        self.end_date_entry.pack(side="left", padx=(0, 10))
+        # === السطر الثالث: زر الحفظ ===
+        row2_frame = tb.Frame(calendar_event_frame)
+        row2_frame.pack(fill="x", pady=(5, 10))
 
         save_btn = ttk.Button(
-            row1_frame,
-            text="💾 حفظ الحدث في التقويم",
-                 style="Green.TButton",
+            row2_frame,
+            text="💾 حفظ",
+            style="Green.TButton",
             command=self._save_calendar_event
         )
-        save_btn.pack(side="left", padx=(10, 0))
+        save_btn.pack(anchor="center", ipadx=20)
 
-        # ===== إضافة إجازة =====
-        vacation_frame = tb.LabelFrame(frame, text="إضافة إجازة", padding=10)
-        vacation_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        # ===== إطار إضافة إجازة =====
+        vacation_frame = tb.LabelFrame(top_row, text="إضافة إجازة", padding=10)
+        vacation_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
 
-        # إعادة ترتيب العناصر: النوع ← الاسم ← من ← إلى (من اليسار إلى اليمين)
         ttk.Label(vacation_frame, text="النوع:").grid(row=0, column=0, sticky="w", padx=(5, 2))
         self.vac_type = ttk.Combobox(vacation_frame, values=["سائق", "طبيب"], state="readonly", width=15, height=10, justify="left")
         self.vac_type.grid(row=0, column=1, padx=5, pady=5)
@@ -2903,16 +2939,27 @@ class MedicalTransApp(tb.Window):
         btns_frame = tb.Frame(vacation_frame)
         btns_frame.grid(row=2, column=0, columnspan=8, pady=10)
 
-        # تأطير داخلي لمركزة الأزرار أفقياً
         inner_btns = tb.Frame(btns_frame)
-        inner_btns.pack(anchor="center")  # المنتصف تمامًا
+        inner_btns.pack(anchor="center")
+        # === السطر الثاني: الوصف / الملاحظات في الإجازة ===
+        row1_frame_vac = tb.Frame(vacation_frame)
+        row1_frame_vac.grid(row=1, column=0, columnspan=8, sticky="ew", pady=5)
+
+        ttk.Label(row1_frame_vac, text="الوصف / الملاحظات:").grid(row=0, column=0, sticky="nw", padx=(5, 5), pady=(2, 0))
+        self.vac_note_text = tb.Text(row1_frame_vac, width=70, height=3, wrap="word")
+        self.vac_note_text.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        row1_frame_vac.columnconfigure(1, weight=1)
+
+        self.vac_note_text.tag_configure("left", justify="left")
+        self.vac_note_text.insert("1.0", "")
+        self.vac_note_text.tag_add("left", "1.0", "end")
 
         ttk.Button(
             inner_btns,
-            text="💾 حفظ الإجازة",
-              style="Orange.TButton",
+            text="💾 حفظ",
+            style="Orange.TButton",
             command=self._save_vacation
-        ).pack(side="left", padx=10, ipadx=20)        
+        ).pack(side="left", padx=10, ipadx=20)
 
         # ===== جدول الأحداث المجدولة =====
         events_frame = tb.LabelFrame(frame, text="الأحداث المجدولة", padding=10)
@@ -2967,7 +3014,7 @@ class MedicalTransApp(tb.Window):
         tree_frame = tb.Frame(vac_table_frame)
         tree_frame.pack(fill="both", expand=True)
 
-        columns = ("id", "person_type", "name", "start", "end")
+        columns = ("id", "person_type", "name", "start", "end", "notes")
         self.vacation_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=5)
         self.vacation_tree.column("id", width=0, stretch=False)
         self.vacation_tree.heading("id", text="")
@@ -2977,7 +3024,7 @@ class MedicalTransApp(tb.Window):
         vsb.pack(side="right", fill="y")
         self.vacation_tree.configure(yscrollcommand=vsb.set)
 
-        self.configure_tree_columns(self.vacation_tree, ["", "النوع", "الاسم", "من", "إلى"])
+        self.configure_tree_columns(self.vacation_tree, ["", "النوع", "الاسم", "من", "إلى", "ملاحظات"])
 
         self._load_vacations_inline = self._define_vac_load_func()
         self.vacation_tree.reload_callback = self._load_vacations_inline
@@ -2986,7 +3033,7 @@ class MedicalTransApp(tb.Window):
         # ✅ تحميل البيانات الأصلية لدعم البحث
         self._load_original_data(
             self.vacation_tree,
-            "SELECT id, person_type, name, start_date, end_date FROM vacations WHERE end_date >= date('now') ORDER BY start_date ASC"
+            "SELECT id, person_type, name, start_date, end_date, notes FROM vacations WHERE end_date >= date('now') ORDER BY start_date ASC"
         )
 
         bottom_controls = tb.Frame(vac_table_frame)
@@ -3024,11 +3071,11 @@ class MedicalTransApp(tb.Window):
             return
 
         values = self.vacation_tree.item(selected[0])["values"]
-        if len(values) < 5:
+        if len(values) < 6:
             self.show_message("error", "تعذر قراءة بيانات العطلة المحددة.")
             return
 
-        vac_id, person_type, name, start_old, end_old = values
+        vac_id, person_type, name, start_old, end_old, notes_old = values
 
         edit_win = self.build_centered_popup("✏️ تعديل الإجازة", 450, 300)
 
@@ -3055,6 +3102,14 @@ class MedicalTransApp(tb.Window):
         end_picker.set(end_old)
         end_picker.grid(row=3, column=1, sticky="ew", pady=5, padx=5)
 
+        # الوصف / الملاحظات
+        ttk.Label(main_frame, text="الوصف / الملاحظات:").grid(row=4, column=0, sticky="nw", pady=5)
+        note_text = tb.Text(main_frame, height=3, wrap="word")
+        note_text.grid(row=4, column=1, sticky="ew", pady=5, padx=5)
+        note_text.insert("1.0", notes_old)
+        note_text.tag_configure("left", justify="left")
+        note_text.tag_add("left", "1.0", "end")
+
         def save_changes():
             new_start = start_picker.get().strip()
             new_end = end_picker.get().strip()
@@ -3071,18 +3126,20 @@ class MedicalTransApp(tb.Window):
 
             with sqlite3.connect("medicaltrans.db") as conn:
                 c = conn.cursor()
+                new_notes = note_text.get("1.0", "end").strip()
+
                 c.execute("""
-                    UPDATE vacations SET start_date = ?, end_date = ? WHERE id = ?
-                """, (new_start, new_end, vac_id))
+                    UPDATE vacations SET start_date = ?, end_date = ?, notes = ? WHERE id = ?
+                """, (new_start, new_end, new_notes, vac_id))
                 conn.commit()
 
             self._load_vacations_inline()
             edit_win.destroy()
             self.show_message("success", "✅ تم تعديل العطلة بنجاح.")
 
-        # زر الحفظ
+        # زر الحفظ (نقل إلى صف جديد لتفادي التداخل)
         btn_frame = tb.Frame(main_frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=15, sticky="ew")
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=15, sticky="ew")
         ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(pady=5, ipadx=20, fill="x")
 
         main_frame.columnconfigure(1, weight=1)
@@ -3163,7 +3220,7 @@ class MedicalTransApp(tb.Window):
         def _load_vacations_inline():
             self.load_table_from_db(
                 self.vacation_tree,
-                "SELECT id, person_type, name, start_date, end_date FROM vacations WHERE end_date >= date('now') ORDER BY start_date ASC"
+                "SELECT id, person_type, name, start_date, end_date, notes FROM vacations WHERE end_date >= date('now') ORDER BY start_date ASC"
             )
         return _load_vacations_inline
 
@@ -3174,7 +3231,7 @@ class MedicalTransApp(tb.Window):
             return
         self._load_original_data(
             tree,
-            "SELECT id, person_type, name, start_date, end_date FROM vacations WHERE end_date < ? ORDER BY end_date DESC",
+            "SELECT id, person_type, name, start_date, end_date, notes FROM vacations WHERE end_date < ? ORDER BY end_date DESC",
             (today,)
         )
 
@@ -3335,15 +3392,16 @@ class MedicalTransApp(tb.Window):
             self.archived_vacations_window = None
             return
 
-        columns = ("id", "person_type", "name", "start", "end")
-        labels = ["", "النوع", "الاسم", "من", "إلى"]
+        columns = ("id", "person_type", "name", "start", "end", "notes")
+        labels = ["", "النوع", "الاسم", "من", "إلى", "ملاحظات"]
 
         # تحميل حسب التاريخ الحالي
         today = datetime.today().strftime("%Y-%m-%d")
+
         def load_archived_vacations(tree):
             self._load_original_data(
                 tree,
-                "SELECT id, person_type, name, start_date, end_date FROM vacations WHERE end_date < ? ORDER BY end_date DESC",
+                "SELECT id, person_type, name, start_date, end_date, notes FROM vacations WHERE end_date < ? ORDER BY end_date DESC",
                 (today,)
             )
 
@@ -3535,10 +3593,12 @@ class MedicalTransApp(tb.Window):
 
         conn = sqlite3.connect("medicaltrans.db")
         c = conn.cursor()
+        notes = self.vac_note_text.get("1.0", "end").strip()
+
         c.execute("""
-            INSERT INTO vacations (person_type, name, start_date, end_date)
-            VALUES (?, ?, ?, ?)
-        """, (person_type, name, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")))
+            INSERT INTO vacations (person_type, name, start_date, end_date, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (person_type, name, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), notes))
         conn.commit()
         conn.close()
 
