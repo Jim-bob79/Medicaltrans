@@ -2305,12 +2305,12 @@ class MedicalTransApp(tb.Window):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     driver_name, 
-                    data[1],  # العنوان
-                    data[2],  # الهاتف
+                    data[3],  # العنوان الصحيح
+                    data[4],  # الهاتف الصحيح
                     driver_from, 
                     driver_to,
-                    data[3],  # نوع العقد
-                    data[7],  # الملاحظات
+                    self.contract_type_combo.get().strip(),  # نوع العقد من الكمبوبوكس مباشرة
+                    data[9],  # الملاحظات الصحيحة
                     assigned_plate if assigned_plate else None,
                     plate_from if plate_from else None,
                     plate_to if plate_to else None
@@ -2572,7 +2572,6 @@ class MedicalTransApp(tb.Window):
                 conn = sqlite3.connect("medicaltrans.db")
                 c = conn.cursor()
 
-                # ✅ استخراج رقم اللوحة الأصلي من قاعدة البيانات
                 c.execute("SELECT assigned_plate, plate_to FROM drivers WHERE id = ?", (driver_id,))
                 row = c.fetchone()
                 original_plate = row[0] if row else ""
@@ -2624,13 +2623,16 @@ class MedicalTransApp(tb.Window):
                         issues = ?, contract_type = ?
                     WHERE id = ?
                 """, (
-                    new_data[0], new_data[1], new_data[2],
-                    new_from, new_to,
+                    new_data[0],      # الاسم
+                    new_data[1],      # العنوان
+                    new_data[2],      # الهاتف
+                    new_from,         # من (بداية العمل)
+                    new_to,           # إلى (نهاية العمل)
                     new_plate or None,
                     new_plate_from or None,
                     new_plate_to or None,
-                    new_data[4],
-                    new_data[3],
+                    new_data[5],      # الملاحظات (وليس new_data[4])
+                    new_data[4],      # نوع العقد (وليس new_data[3])
                     driver_id
                 ))
                 conn.commit()
