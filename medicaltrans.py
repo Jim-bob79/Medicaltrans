@@ -25,6 +25,27 @@ def setup_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT, available_from TEXT, material_from_lab TEXT,
             address TEXT, target_lab TEXT, billing TEXT, issues TEXT)""")
+
+        # ✅ توسعة جدول الأطباء بالحقول الجديدة (دون التأثير على الحقول القديمة)
+        try: c.execute("ALTER TABLE doctors ADD COLUMN street TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN city TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN zip_code TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN visit_type TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN phone TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN materials TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN labs TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN billing_by TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE doctors ADD COLUMN price_per_trip REAL")
+        except sqlite3.OperationalError: pass
+
         c.execute("""CREATE TABLE IF NOT EXISTS labs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT, address TEXT)""")
@@ -35,21 +56,14 @@ def setup_database():
             employment_end_date TEXT,
             issues TEXT,
             contract_type TEXT)""")
+
         # تعديل جدول السائقين لإضافة حقول السيارة (إن لم تكن موجودة)
-        try:
-            c.execute("ALTER TABLE drivers ADD COLUMN assigned_plate TEXT")
-        except sqlite3.OperationalError:
-            pass  # العمود موجود بالفعل
-
-        try:
-            c.execute("ALTER TABLE drivers ADD COLUMN plate_from TEXT")
-        except sqlite3.OperationalError:
-            pass
-
-        try:
-            c.execute("ALTER TABLE drivers ADD COLUMN plate_to TEXT")
-        except sqlite3.OperationalError:
-            pass
+        try: c.execute("ALTER TABLE drivers ADD COLUMN assigned_plate TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE drivers ADD COLUMN plate_from TEXT")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE drivers ADD COLUMN plate_to TEXT")
+        except sqlite3.OperationalError: pass
 
         c.execute("""CREATE TABLE IF NOT EXISTS calendar_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +74,7 @@ def setup_database():
             driver_name TEXT, task_date TEXT,
             doctor_name TEXT, lab_name TEXT,
             time_window TEXT, materials TEXT, doctor_address TEXT)""")
+
         # ✅ جدول أرشفة علاقات السائق بالسيارة
         c.execute("""CREATE TABLE IF NOT EXISTS driver_car_assignments_archive (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,12 +85,14 @@ def setup_database():
             plate_to TEXT,
             archived_at TEXT
         )""")
+
         c.execute("""CREATE TABLE IF NOT EXISTS car_maintenance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             license_plate TEXT,
             autobahnpickerl_from TEXT, autobahnpickerl_to TEXT,
             yearly_pickerl_until TEXT, notes TEXT
         )""")
+
         # ✅ جدول الأرشيف للسيارات
         c.execute("""CREATE TABLE IF NOT EXISTS archived_car_maintenance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +102,7 @@ def setup_database():
             yearly_pickerl_until TEXT,
             notes TEXT
         )""")
+
         # ✅ جدول المواعيد المرتبطة بالسيارات
         c.execute("""CREATE TABLE IF NOT EXISTS car_appointments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,10 +116,8 @@ def setup_database():
             person_type TEXT, name TEXT,
             start_date TEXT, end_date TEXT)""")
 
-        try:
-            c.execute("ALTER TABLE vacations ADD COLUMN notes TEXT")
-        except sqlite3.OperationalError:
-            pass
+        try: c.execute("ALTER TABLE vacations ADD COLUMN notes TEXT")
+        except sqlite3.OperationalError: pass
 
         c.execute("""CREATE TABLE IF NOT EXISTS archived_car_appointments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,6 +134,18 @@ def setup_database():
                 amount REAL
             )
         """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS billing_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doctor_id INTEGER,
+                doctor_name TEXT,
+                lab_name TEXT,
+                trip_date TEXT,
+                price_per_trip REAL
+            )
+        """)
+
     conn.commit()
 
 class MedicalTransApp(tb.Window):
@@ -127,6 +155,9 @@ class MedicalTransApp(tb.Window):
         self.title("Medicaltrans GmbH – إدارة النقل الطبي")
         self.geometry("1200x700")
         self.current_theme = "lumen"
+
+        self.tab_frames = {}
+        self.tabs = {}
     
         self._setup_custom_styles()
         self._build_header()
@@ -1309,102 +1340,86 @@ class MedicalTransApp(tb.Window):
         # === إطار بيانات السيارة ===
         form_frame = ttk.LabelFrame(top_container, text="📋 بيانات السيارة", padding=15)
         form_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        form_frame.configure(width=330)
+        form_frame.columnconfigure(1, weight=1)
 
-        row1 = tb.Frame(form_frame)
-        row1.pack(anchor="w", pady=(6, 0))
-        ttk.Label(row1, text="رقم اللوحة:").pack(side="left")
-        ttk.Label(row1, text="*", foreground="red").pack(side="left")
-        license_plate_entry = tb.Entry(form_frame, width=30)
-        license_plate_entry.pack(anchor="w", pady=(0, 6))
+        # رقم اللوحة
+        ttk.Label(form_frame, text="رقم اللوحة:").grid(row=0, column=0, sticky="e", pady=4, padx=5)
+        license_plate_entry = tb.Entry(form_frame, width=20)  # ← عرض أصغر
+        license_plate_entry.grid(row=0, column=1, sticky="w", pady=4, padx=5)  # ← بدون تمدد
         self.car_entries.append(license_plate_entry)
 
-        row_autobahn = tb.Frame(form_frame)
-        row_autobahn.pack(anchor="w", pady=6)
-
-        col_from = tb.Frame(row_autobahn)
-        col_from.pack(side="left", padx=(0, 20))
-
-        from_label_row = tb.Frame(col_from)
-        from_label_row.pack(anchor="w")
-        ttk.Label(from_label_row, text="Autobahn Pickerl من:").pack(side="left")
-        ttk.Label(from_label_row, text="*", foreground="red").pack(side="left", padx=(4, 0))
-
-        from_autobahn = CustomDatePicker(col_from)
-        from_autobahn.pack(anchor="w")
+        # Autobahn Pickerl من
+        ttk.Label(form_frame, text="Autobahn Pickerl من:").grid(row=1, column=0, sticky="e", pady=4, padx=5)
+        from_autobahn = CustomDatePicker(form_frame)
+        from_autobahn.grid(row=1, column=1, sticky="ew", pady=4, padx=5)
         self.car_entries.append(from_autobahn.entry)
 
-        col_to = tb.Frame(row_autobahn)
-        col_to.pack(side="left")
-
-        to_label_row = tb.Frame(col_to)
-        to_label_row.pack(anchor="w")
-        ttk.Label(to_label_row, text="Autobahn Pickerl إلى:").pack(side="left")
-        ttk.Label(to_label_row, text="*", foreground="red").pack(side="left", padx=(4, 0))
-
-        to_autobahn = CustomDatePicker(col_to)
-        to_autobahn.pack(anchor="w")
+        # Autobahn Pickerl إلى
+        ttk.Label(form_frame, text="Autobahn Pickerl إلى:").grid(row=2, column=0, sticky="e", pady=4, padx=5)
+        to_autobahn = CustomDatePicker(form_frame)
+        to_autobahn.grid(row=2, column=1, sticky="ew", pady=4, padx=5)
         self.car_entries.append(to_autobahn.entry)
 
-        row4 = tb.Frame(form_frame)
-        row4.pack(anchor="w", pady=6)
-        ttk.Label(row4, text="Jährlich Pickerl حتى:").pack(side="left")
-        ttk.Label(row4, text="*", foreground="red").pack(side="left")
+        # Jährlich Pickerl حتى
+        ttk.Label(form_frame, text="Jährlich Pickerl حتى:").grid(row=3, column=0, sticky="e", pady=4, padx=5)
         yearly_pickerl = CustomDatePicker(form_frame)
-        yearly_pickerl.pack(anchor="w")
+        yearly_pickerl.grid(row=3, column=1, sticky="ew", pady=4, padx=5)
         self.car_entries.append(yearly_pickerl.entry)
 
-        ttk.Label(form_frame, text="ملاحظات:").pack(anchor="w", pady=5)
-        notes_entry = tb.Entry(form_frame, width=60)
-        notes_entry.pack(anchor="w", pady=(0, 8))
+        # ملاحظات
+        ttk.Label(form_frame, text="ملاحظات:").grid(row=4, column=0, sticky="ne", pady=4, padx=5)
+        notes_entry = tb.Entry(form_frame)
+        notes_entry.grid(row=4, column=1, sticky="ew", pady=4, padx=5)
         self.car_entries.append(notes_entry)
 
-        ttk.Button(form_frame, text="💾 حفظ بيانات السيارة", style="Green.TButton", command=self.save_car_data).pack(pady=15, ipadx=20)
+        # زر الحفظ
+        ttk.Button(form_frame, text="💾 حفظ بيانات السيارة", style="Green.TButton", command=self.save_car_data).grid(row=5, column=0, columnspan=2, pady=15)
 
+        # === إطار "📅 إضافة موعد" ===
         appointment_frame = ttk.LabelFrame(top_container, text="📅 إضافة موعد", padding=15)
         appointment_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
-        appointment_frame.configure(width=330)
+        appointment_frame.columnconfigure(1, weight=1)
 
-        label_row = tb.Frame(appointment_frame)
-        label_row.pack(anchor="w", pady=(5, 2))
-        ttk.Label(label_row, text="رقم اللوحة:").pack(side="left")
-        ttk.Label(label_row, text="*", foreground="red").pack(side="left")
+        # رقم اللوحة
+        ttk.Label(appointment_frame, text="رقم اللوحة:").grid(row=0, column=0, sticky="e", pady=4, padx=5)
         self.car_plate_combo = ttk.Combobox(appointment_frame, values=self.get_all_license_plates(), state="readonly", width=20)
-        self.car_plate_combo.pack(anchor="w", pady=2)
+        self.car_plate_combo.grid(row=0, column=1, sticky="w", pady=4, padx=5)
 
-        ttk.Label(appointment_frame, text="نوع الموعد:").pack(anchor="w", pady=(10, 2))
-        self.appointment_type_entry = tb.Entry(appointment_frame, width=25)
-        self.appointment_type_entry.pack(anchor="w", pady=2)
-
-        label_row = tb.Frame(appointment_frame)
-        label_row.pack(anchor="w", pady=(10, 2))
-        ttk.Label(label_row, text="تاريخ الموعد:").pack(side="left")
-        ttk.Label(label_row, text="*", foreground="red").pack(side="left")
+        # تاريخ الموعد ← أولاً
+        ttk.Label(appointment_frame, text="تاريخ الموعد:").grid(row=1, column=0, sticky="e", pady=4, padx=5)
         self.appointment_date_picker = CustomDatePicker(appointment_frame)
-        self.appointment_date_picker.pack(anchor="w", pady=2)
+        self.appointment_date_picker.grid(row=1, column=1, sticky="ew", pady=4, padx=5)
 
-        ttk.Button(appointment_frame, text="💾 إضافة الموعد", style="Green.TButton", command=self._add_appointment).pack(pady=15, ipadx=20)
+        # نوع الموعد ← تحته مباشرة
+        ttk.Label(appointment_frame, text="نوع الموعد:").grid(row=2, column=0, sticky="e", pady=4, padx=5)
+        self.appointment_type_entry = tb.Entry(appointment_frame)
+        self.appointment_type_entry.grid(row=2, column=1, sticky="ew", pady=4, padx=5)
 
+        # زر الإضافة
+        ttk.Button(appointment_frame, text="💾 إضافة الموعد", style="Green.TButton", command=self._add_appointment).grid(row=3, column=0, columnspan=2, pady=15)
+
+        # === إطار "📤 إخراج السيارة" ===
         retire_frame = ttk.LabelFrame(top_container, text="📤 إخراج السيارة", padding=15)
         retire_frame.grid(row=0, column=2, sticky="nsew")
-        retire_frame.configure(width=330)
+        retire_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(retire_frame, text="إختر السيارة:").pack(anchor="w", pady=(5, 2))
+        # اختر السيارة
+        ttk.Label(retire_frame, text="رقم اللوحة:").grid(row=0, column=0, sticky="e", pady=4, padx=5)
         self.retire_plate_combo = ttk.Combobox(retire_frame, values=self.get_all_license_plates(), state="readonly", width=20)
-        self.retire_plate_combo.pack(anchor="w", pady=2)
+        self.retire_plate_combo.grid(row=0, column=1, sticky="w", pady=4, padx=5)
 
-        label_row = tb.Frame(retire_frame)
-        label_row.pack(anchor="w", pady=(10, 2))
-        ttk.Label(label_row, text="تاريخ الإخراج:").pack(side="left")
-        ttk.Label(label_row, text="*", foreground="red").pack(side="left")
+        # تاريخ الإخراج
+        ttk.Label(retire_frame, text="تاريخ الإخراج:").grid(row=1, column=0, sticky="e", pady=4, padx=5)
         self.retire_date_picker = CustomDatePicker(retire_frame)
-        self.retire_date_picker.pack(anchor="w", pady=2)
+        self.retire_date_picker.grid(row=1, column=1, sticky="ew", pady=4, padx=5)
 
-        ttk.Label(retire_frame, text="ملاحظات إضافية:").pack(anchor="w", pady=(10, 2))
-        self.retire_notes_entry = tb.Entry(retire_frame, width=30)
-        self.retire_notes_entry.pack(anchor="w", pady=2)
+        # ملاحظات إضافية
+        ttk.Label(retire_frame, text="ملاحظات إضافية:").grid(row=2, column=0, sticky="ne", pady=4, padx=5)
+        self.retire_notes_entry = tb.Entry(retire_frame)
+        self.retire_notes_entry.grid(row=2, column=1, sticky="ew", pady=4, padx=5)
 
-        ttk.Button(retire_frame, text="💾 موافق", style="Red.TButton", command=self._retire_selected_car).pack(pady=15, ipadx=20)
+        # زر موافق
+        ttk.Button(retire_frame, text="💾 موافق", style="Red.TButton", command=self._retire_selected_car).grid(row=3, column=0, columnspan=2, pady=15)
 
         table_frame = ttk.LabelFrame(frame, text="🚗 جدول السيارات", padding=10)
         table_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1757,7 +1772,7 @@ class MedicalTransApp(tb.Window):
         car_id = values[0]
         original_values = values[1:]  # بدون id
 
-        edit_win = self.build_centered_popup("📝 تعديل السيارة", 600, 450)
+        edit_win = self.build_centered_popup("📝 تعديل السيارة", 600, 350)
 
         main_frame = tb.Frame(edit_win, padding=15)
         main_frame.pack(fill="both", expand=True)
@@ -1885,79 +1900,621 @@ class MedicalTransApp(tb.Window):
         btn_frame = tb.Frame(main_frame)
         btn_frame.grid(row=len(labels), column=0, columnspan=2, pady=15)
 
+        # زر حفظ التعديلات
         ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_car_edit_changes)\
-            .pack(side="left", padx=10, ipadx=10)
+            .pack(side="left", padx=5, ipadx=10)
+
+        # زر الإغلاق الأحمر
+        ttk.Button(btn_frame, text="❌ إغلاق", style="danger.TButton", command=edit_win.destroy)\
+            .pack(side="left", padx=5, ipadx=10)
 
         main_frame.columnconfigure(1, weight=1)
 
     def _build_doctor_tab(self):
+        import json
+
         frame = tb.Frame(self.content_frame, padding=20)
-        # frame.pack(fill="both", expand=True)
+        self.doctor_entries = {}
 
-        labels = [
-            "اسم الطبيب:", "وقت التواجد (من - إلى أو ملاحظة):",
-            "المواد من المخبر للطبيب:", "عنوان الطبيب:",
-            "المخبر المستقبل للعينات:", "الفواتير (اختياري):"
-        ]
+        # === الإطار الموحد ===
+        container = ttk.LabelFrame(frame, text="👨‍⚕️ بيانات الطبيب الجديد", padding=15)
+        container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.doctor_entries = []
-        for i, text in enumerate(labels):
-            ttk.Label(frame, text=text).grid(row=i, column=0, sticky="w", pady=5)
-            entry = tb.Entry(frame, width=60)
-            entry.grid(row=i, column=1, pady=5)
-            self.doctor_entries.append(entry)
+        row = 0  # عداد الصفوف
 
-        # زر حفظ بيانات الطبيب بتنسيق احترافي
+        def add_label_with_star(parent, text, row, col, required=False):
+            label_frame = tb.Frame(parent)
+            label_frame.grid(row=row, column=col, sticky="e", pady=5)  # 🔁 أزل padding الأفقي من هنا
+            ttk.Label(label_frame, text=text).pack(side="left")
+            if required:
+                ttk.Label(label_frame, text="*", foreground="red").pack(side="left")
+
+        # === اسم الطبيب ===
+        row = 0
+        # الجهة اليسرى
+        add_label_with_star(container, "👨‍⚕️ اسم الطبيب:", row, 0, required=True)
+        name_entry = tb.Entry(container, width=25)
+        name_entry.grid(row=row, column=1, sticky="w", pady=5)
+        self.doctor_entries["name"] = name_entry
+        row += 1
+
+        # === الشارع ورقم المنزل ===
+        add_label_with_star(container, "🏠 الشارع ورقم المنزل:", row, 0, required=True)
+        street_entry = tb.Entry(container, width=25)
+        street_entry.grid(row=row, column=1, sticky="w", pady=5)
+        self.doctor_entries["street"] = street_entry
+        row += 1
+
+        # === المدينة ===
+        add_label_with_star(container, "🏙 المدينة:", row, 0, required=True)
+        city_entry = tb.Entry(container, width=25)
+        city_entry.grid(row=row, column=1, sticky="w", pady=5)
+        self.doctor_entries["city"] = city_entry
+        row += 1
+
+        # === Zip Code ===
+        add_label_with_star(container, "🏷 Zip Code:", row, 0, required=True)
+        zip_entry = tb.Entry(container, width=25)
+        zip_entry.grid(row=row, column=1, sticky="w", pady=5)
+        self.doctor_entries["zip_code"] = zip_entry
+        row += 1
+
+        # === رقم الهاتف ===
+        add_label_with_star(container, "📞 رقم الهاتف:", row, 0)
+        phone_entry = tb.Entry(container, width=25)
+        phone_entry.grid(row=row, column=1, sticky="w", pady=5)
+        self.doctor_entries["phone"] = phone_entry
+
+        right_row = 0  # نفس الصفوف للجهة اليمنى
+
+        # === وقت التواجد (Abholung) ===
+        visit_field_frame = tb.Frame(container)
+        visit_field_frame.grid(row=right_row, column=2, sticky="w", padx=50, pady=5, columnspan=2)
+        visit_field_frame.grid_columnconfigure(0, minsize=130)
+        # اسم الحقل مع النجمة
+        add_label_with_star(visit_field_frame, "⏰ وقت التواجد:", 0, 0, required=True)
+        # الإدخال بجوار الاسم مباشرة
+        visit_var = tk.StringVar(value="none")
+        visit_frame = tb.Frame(visit_field_frame)
+        visit_frame.grid(row=0, column=1, sticky="w", padx=5)
+        for text, val in [("من الساعة", "from"), ("من - إلى", "from_to"), ("بعد الساعة", "after"),
+                          ("عند الاتصال", "call"), ("بدون موعد (Anschl.)", "anschluss")]:
+            ttk.Radiobutton(visit_frame, text=text, variable=visit_var, value=val).pack(side="left", padx=4)
+        self.doctor_entries["visit_type"] = visit_var
+        right_row += 1
+
+        # === المواد (Bechreibung) ===
+        material_field_frame = tb.Frame(container)
+        material_field_frame.grid(row=right_row, column=2, sticky="w", padx=50, pady=5, columnspan=2)
+        material_field_frame.grid_columnconfigure(0, minsize=130)
+        add_label_with_star(material_field_frame, "📦 المواد:", 0, 0, required=True)
+        material_frame = tb.Frame(material_field_frame)
+        material_frame.grid(row=0, column=1, sticky="w", padx=5)
+        material_options = ["BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer"]
+        self.material_vars = {}
+        for i, mat in enumerate(material_options):
+            var = tk.BooleanVar()
+            ttk.Checkbutton(material_frame, text=mat, variable=var).grid(row=i // 3, column=i % 3, padx=5, pady=3, sticky="w")
+            self.material_vars[mat] = var
+        right_row += 1
+
+        # === المخابر المرتبطة ===
+        lab_field_frame = tb.Frame(container)
+        lab_field_frame.grid(row=right_row, column=2, sticky="w", padx=50, pady=5, columnspan=2)
+        lab_field_frame.grid_columnconfigure(0, minsize=130)
+        add_label_with_star(lab_field_frame, "🧪 المخابر المرتبطة:", 0, 0, required=True)
+        lab_frame = tb.Frame(lab_field_frame)
+        lab_frame.grid(row=0, column=1, sticky="w", padx=5)
+        self.lab_vars_container = lab_frame
+        self.lab_vars = {}
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("SELECT name FROM labs ORDER BY name ASC")
+                labs = [r[0] for r in c.fetchall()]
+        except:
+            labs = []
+        for i, lab in enumerate(labs):
+            var = tk.BooleanVar()
+            ttk.Checkbutton(lab_frame, text=lab, variable=var).grid(row=i // 3, column=i % 3, padx=5, pady=3, sticky="w")
+            self.lab_vars[lab] = var
+        right_row += 1
+
+        # === السعر لكل نقلة (اختياري) ===
+        price_field_frame = tb.Frame(container)
+        price_field_frame.grid(row=right_row, column=2, sticky="w", padx=50, pady=5, columnspan=2)
+        price_field_frame.grid_columnconfigure(0, minsize=130)
+        add_label_with_star(price_field_frame, "💶 السعر لكل نقلة (€):", 0, 0)
+        price_entry = tb.Entry(price_field_frame, width=25)
+        price_entry.grid(row=0, column=1, sticky="w", padx=5)
+        self.doctor_entries["price_per_trip"] = price_entry
+
+        # === زر الحفظ داخل الإطار نفسه ===
         ttk.Button(
-            frame,
-            text="💾 حفظ بيانات الطبيب",
-            style="Green.TButton",
+            container, text="💾 حفظ", style="Green.TButton",
             command=self._save_doctor
-        ).grid(row=len(labels), column=0, columnspan=2, pady=20)
+        ).grid(row=max(row, right_row) + 1, column=0, columnspan=4, pady=10)
+        row += 1
+
+        # === قائمة الأطباء خارج الإطار ===
+        self.doctor_list_container = ttk.LabelFrame(frame, text="📄 قائمة الأطباء", padding=10)
+        self.doctor_list_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self._reload_doctor_list()
 
         return frame
 
     def _save_doctor(self):
-        data = [e.get().strip() for e in self.doctor_entries]
-        if not data[0]:
-            self.show_message("warning", "يرجى إدخال اسم الطبيب.")
+        import json
+
+        name = self.doctor_entries["name"].get().strip()
+        phone = self.doctor_entries["phone"].get().strip()
+        street = self.doctor_entries["street"].get().strip()
+        city = self.doctor_entries["city"].get().strip()
+        zip_code = self.doctor_entries["zip_code"].get().strip()
+        visit_type = self.doctor_entries["visit_type"].get()
+        price_text = self.doctor_entries["price_per_trip"].get().strip()
+
+        # ✅ التحقق من الحقول الإلزامية
+        missing_fields = []
+
+        if not name:
+            missing_fields.append("اسم الطبيب")
+
+        if not street or not city or not zip_code:
+            missing_fields.append("العنوان الكامل")
+
+        if visit_type == "none":
+            missing_fields.append("وقت التواجد")
+
+        if not any(var.get() for var in self.material_vars.values()):
+            missing_fields.append("المواد")
+
+        if not any(var.get() for var in self.lab_vars.values()):
+            missing_fields.append("المخابر")
+
+        if missing_fields:
+            msg = "⚠️ الحقول التالية مطلوبة:\n" + "\n".join(f"• {field}" for field in missing_fields)
+            self.show_message("warning", msg)
             return
 
-        conn = sqlite3.connect("medicaltrans.db")
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO doctors (name, available_from, material_from_lab, address, target_lab, billing)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, data)
-        conn.commit()
-        conn.close()
-        for e in self.doctor_entries:
-            e.delete(0, tb.END)
+        # ✅ معالجة السعر
+        try:
+            price_per_trip = float(price_text) if price_text else None
+        except ValueError:
+            self.show_message("warning", "⚠️ السعر غير صالح.")
+            return
 
-        self.show_message("success", f"✅ تم حفظ الطبيب: {data[0]}")
+        # ✅ المواد بصيغة JSON
+        selected_materials = [mat for mat, var in self.material_vars.items() if var.get()]
+        materials_json = json.dumps(selected_materials, ensure_ascii=False)
+
+        # ✅ المخابر بصيغة JSON
+        selected_labs = [lab for lab, var in self.lab_vars.items() if var.get()]
+        labs_json = json.dumps(selected_labs, ensure_ascii=False)
+
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO doctors 
+                (name, phone, street, city, zip_code, visit_type, materials, labs, price_per_trip)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                name, phone, street, city, zip_code,
+                visit_type, materials_json, labs_json, price_per_trip  # ✅ السعر أُضيف هنا
+            ))
+            conn.commit()
+
+        # ✅ مسح الحقول بعد الحفظ
+        for entry in self.doctor_entries.values():
+            if isinstance(entry, tb.Entry):
+                entry.delete(0, tk.END)
+
+        self.doctor_entries["visit_type"].set("none")
+    
+        for var in self.material_vars.values():
+            var.set(False)
+
+        for var in self.lab_vars.values():
+            var.set(False)
+
+        self._reload_doctor_list()
+        self.show_message("success", f"✅ تم حفظ الطبيب: {name}")
+
+    def _reload_doctor_tab(self):
+        old_frame = self.tab_frames.get("الأطباء")
+        if old_frame is not None:
+            try:
+                self.notebook.forget(old_frame)
+            except Exception:
+                pass
+            try:
+                old_frame.destroy()  # هذا مهم جداً لمسح كل الواجهة القديمة من الذاكرة
+            except Exception:
+                pass
+
+        new_frame = self._build_doctor_tab()
+        self.tab_frames["الأطباء"] = new_frame
+        self.notebook.add(new_frame, text="الأطباء")
+        self.notebook.select(new_frame)
+
+    def _reload_doctor_list(self):
+        # 🧹 تنظيف المحتوى القديم
+        for widget in self.doctor_list_container.winfo_children():
+            widget.destroy()
+
+        # 📥 جلب الأطباء من قاعدة البيانات
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("SELECT id, name, street, city FROM doctors ORDER BY name ASC")
+            doctors = c.fetchall()
+
+        if not doctors:
+            ttk.Label(self.doctor_list_container, text="🚫 لا يوجد أطباء مسجلين.").pack()
+            return
+
+        for doctor_id, name, street, city in doctors:
+            card = tb.Frame(self.doctor_list_container, padding=10, style="custom.light.TFrame")
+            card.pack(fill="x", pady=5, padx=5)
+
+            label = f"👨‍⚕️ {name} – {street or ''}, {city or ''}"
+            ttk.Label(card, text=label, justify="right", anchor="w", font=("Segoe UI", 10))\
+                .pack(side="left", expand=True, fill="x")
+
+            ttk.Button(card, text="✏️ تعديل", style="Primary.TButton",
+                       command=lambda doc_id=doctor_id: self._edit_doctor_popup(doc_id)).pack(side="right", padx=5)
+
+    def _edit_doctor_popup(self, doctor_id):
+        import json
+
+        # === جلب البيانات من قاعدة البيانات ===
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT name, phone, street, city, zip_code,
+                       visit_type, materials, labs, price_per_trip
+                FROM doctors WHERE id = ?
+            """, (doctor_id,))
+            row = c.fetchone()
+
+        if not row:
+            self.show_message("error", "لم يتم العثور على بيانات الطبيب.")
+            return
+
+        (name, phone, street, city, zip_code,
+        visit_type, materials_json, labs_json,
+        price_per_trip) = row
+
+        # === نافذة التعديل ===
+        win = self.build_centered_popup("✏️ تعديل بيانات الطبيب", 700, 650)
+
+        frame = tb.Frame(win, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        # ✅ إطار موحد للحقل مثل إضافة الطبيب
+        container = ttk.LabelFrame(frame, text="📋 تعديل بيانات الطبيب", padding=15)
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # 📋 الحقول
+        entries = {}
+
+        def add_labeled_entry(parent, label, value, row, col, required=False):
+            full_label = f"{label} *" if required else f"{label}  "
+            ttk.Label(parent, text=full_label).grid(row=row, column=col, sticky="e", padx=5, pady=5)
+    
+            ent = tb.Entry(parent, width=30)
+            ent.insert(0, value or "")
+            ent.grid(row=row, column=col+1, sticky="w", pady=5)
+            return ent
+
+        # 👤 معلومات الطبيب
+        row = 0
+        entries["name"] = add_labeled_entry(container, "👨‍⚕️ اسم الطبيب:", name, row, 0, required=True)
+        entries["phone"] = add_labeled_entry(container, "📞 رقم الهاتف:", phone, row, 2)
+        row += 1
+
+        entries["street"] = add_labeled_entry(container, "🏠 الشارع:", street, row, 0, required=True)
+        entries["city"] = add_labeled_entry(container, "🏙 المدينة:", city, row, 2, required=True)
+        row += 1
+
+        entries["zip_code"] = add_labeled_entry(container, "🏷 Zip Code:", zip_code, row, 0, required=True)
+
+        # 🕒 وقت الزيارة
+        visit_label_frame = tb.Frame(container)
+        visit_label_frame.grid(row=row, column=0, sticky="e", padx=5, pady=5)
+        ttk.Label(visit_label_frame, text="⏰ وقت التواجد:").pack(side="left")
+        ttk.Label(visit_label_frame, text="*", foreground="red").pack(side="left")
+
+        visit_var = tk.StringVar(value=visit_type or "none")
+        visit_opts = [("من الساعة", "from"), ("من - إلى", "from_to"), ("بعد الساعة", "after"),
+                      ("عند الاتصال", "call"), ("Anschl.", "anschluss")]
+
+        visit_frame = tb.Frame(container)
+        visit_frame.grid(row=row, column=1, columnspan=3, sticky="w")
+        for text, val in visit_opts:
+            ttk.Radiobutton(visit_frame, text=text, variable=visit_var, value=val).pack(side="left", padx=5)
+
+        row += 1
+
+        # 📦 المواد
+        material_label_frame = tb.Frame(container)
+        material_label_frame.grid(row=row, column=0, sticky="e", padx=5, pady=5)
+        ttk.Label(material_label_frame, text="📦 المواد:").pack(side="left")
+        ttk.Label(material_label_frame, text="*", foreground="red").pack(side="left")
+
+        material_frame = tb.Frame(container)
+        material_frame.grid(row=row, column=1, columnspan=3, sticky="w")
+
+        material_options = ["BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer"]
+        material_vars = {}
+        selected_materials = json.loads(materials_json or "[]")
+        for i, mat in enumerate(material_options):
+            var = tk.BooleanVar(value=mat in selected_materials)
+            cb = ttk.Checkbutton(material_frame, text=mat, variable=var)
+            cb.grid(row=i // 3, column=i % 3, padx=5, pady=3, sticky="w")
+            material_vars[mat] = var
+
+        row += 1
+
+        # 🧪 المخابر
+        lab_label_frame = tb.Frame(container)
+        lab_label_frame.grid(row=row, column=0, sticky="e", padx=5, pady=5)
+        ttk.Label(lab_label_frame, text="🧪 المخابر:").pack(side="left")
+        ttk.Label(lab_label_frame, text="*", foreground="red").pack(side="left")
+
+        lab_frame = tb.Frame(container)
+        lab_frame.grid(row=row, column=1, columnspan=3, sticky="w")
+
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("SELECT name FROM labs")
+                all_labs = [r[0] for r in c.fetchall()]
+        except:
+            all_labs = []
+
+        selected_labs = json.loads(labs_json or "[]")
+        lab_vars = {}
+        for i, lab in enumerate(all_labs):
+            var = tk.BooleanVar(value=lab in selected_labs)
+            cb = ttk.Checkbutton(lab_frame, text=lab, variable=var)
+            cb.grid(row=i // 3, column=i % 3, padx=5, pady=3, sticky="w")
+            lab_vars[lab] = var
+
+        row += 1
+
+        # 💶 السعر لكل نقلة
+        entries["price_per_trip"] = add_labeled_entry(container, "💶 السعر لكل نقلة (€):", price_per_trip or "", row, 2)
+        row += 1
+
+        # 🔘 الأزرار
+        btns = tb.Frame(frame)
+        btns.grid(row=10, column=0, columnspan=2, pady=20)
+
+        def save_changes():
+            new_values = {
+                "name": entries["name"].get().strip(),
+                "phone": entries["phone"].get().strip(),
+                "street": entries["street"].get().strip(),
+                "city": entries["city"].get().strip(),
+                "zip_code": entries["zip_code"].get().strip(),
+                "visit_type": visit_var.get(),
+                "materials": json.dumps([m for m, v in material_vars.items() if v.get()], ensure_ascii=False),
+                "labs": json.dumps([l for l, v in lab_vars.items() if v.get()], ensure_ascii=False),
+                "price_per_trip": None
+            }
+
+            # ✅ التحقق من الحقول الإلزامية
+            missing_fields = []
+            if not new_values["name"]:
+                missing_fields.append("اسم الطبيب")
+
+            if not new_values["street"] or not new_values["city"] or not new_values["zip_code"]:
+                missing_fields.append("العنوان الكامل")
+
+            if new_values["visit_type"] == "none":
+                missing_fields.append("وقت التواجد")
+
+            if not any(v.get() for v in material_vars.values()):
+                missing_fields.append("المواد")
+
+            if not any(v.get() for v in lab_vars.values()):
+                missing_fields.append("المخابر")
+
+            if missing_fields:
+                msg = "⚠️ الحقول التالية مطلوبة:\n" + "\n".join(f"• {field}" for field in missing_fields)
+                self.show_message("warning", msg)
+                return
+
+            # ✅ معالجة السعر
+            try:
+                price = entries["price_per_trip"].get().strip()
+                new_values["price_per_trip"] = float(price) if price else None
+            except ValueError:
+                self.show_message("warning", "⚠️ السعر غير صالح.")
+                return
+
+            # ✅ التحديث في قاعدة البيانات
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("""
+                    UPDATE doctors SET
+                        name=?, phone=?, street=?, city=?, zip_code=?,
+                        visit_type=?, materials=?, labs=?, price_per_trip=?
+                    WHERE id=?
+                """, (
+                    new_values["name"], new_values["phone"], new_values["street"],
+                    new_values["city"], new_values["zip_code"], new_values["visit_type"],
+                    new_values["materials"], new_values["labs"],
+                    new_values["price_per_trip"], doctor_id
+                ))
+                conn.commit()
+
+            win.destroy()
+            self._reload_doctor_list()
+            self.show_message("success", f"✅ تم تعديل بيانات الطبيب: {new_values['name']}")
+
+        # أزرار الحفظ والحذف والإغلاق
+        center_buttons = tb.Frame(btns)
+        center_buttons.pack(anchor="center")
+
+        ttk.Button(center_buttons, text="💾 حفظ", style="Green.TButton", command=save_changes)\
+            .pack(side="left", padx=10)
+
+        ttk.Button(center_buttons, text="🗑 حذف", style="warning.TButton", command=lambda: delete_doctor())\
+            .pack(side="left", padx=10)
+
+        ttk.Button(center_buttons, text="❌ إغلاق", style="danger.TButton", command=win.destroy)\
+            .pack(side="left", padx=10)
+
+        def delete_doctor():
+            if not self.show_custom_confirm("تأكيد الحذف", f"⚠️ هل تريد حذف الطبيب '{name}'؟"):
+                return
+
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("DELETE FROM doctors WHERE id = ?", (doctor_id,))
+                conn.commit()
+
+            self._reload_doctor_list()
+            win.destroy()
+            self.show_message("success", f"🗑 تم حذف الطبيب: {name}")
 
     def _build_lab_tab(self):
         frame = tb.Frame(self.content_frame, padding=20)
-        # frame.pack(fill="both", expand=True)
+
+        # ===== إطار بيانات الإدخال =====
+        form_frame = ttk.LabelFrame(frame, text="📋 إضافة مخبر جديد", padding=15)
+        form_frame.pack(fill="x", padx=10, pady=(0, 15))
 
         labels = ["اسم المخبر:", "عنوان المخبر:"]
         self.lab_entries = []
 
         for i, text in enumerate(labels):
-            ttk.Label(frame, text=text).grid(row=i, column=0, sticky="w", pady=5)
-            entry = tb.Entry(frame, width=60)
-            entry.grid(row=i, column=1, pady=5)
+            ttk.Label(form_frame, text=text).grid(row=i, column=0, sticky="e", pady=6, padx=(5, 5))
+            entry = tb.Entry(form_frame, width=60)
+            entry.grid(row=i, column=1, pady=6, padx=(0, 10), sticky="w")
             self.lab_entries.append(entry)
 
-        # زر حفظ بيانات المخبر بتنسيق احترافي
+        # زر الحفظ
         ttk.Button(
-            frame,
-            text="💾 حفظ بيانات المخبر",
+            form_frame,
+            text="💾 حفظ",
             style="Green.TButton",
             command=self._save_lab
-        ).grid(row=len(labels), column=0, columnspan=2, pady=20)
+        ).grid(row=2, column=0, columnspan=2, pady=10)
+
+        # ===== قائمة المخابر =====
+        self.lab_list_container = ttk.LabelFrame(frame, text="🧪 المخابر المسجلة", padding=15)
+        self.lab_list_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self._reload_lab_list()
 
         return frame
+
+    def _reload_lab_list(self):
+        for widget in self.lab_list_container.winfo_children():
+            widget.destroy()
+
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("SELECT id, name, address FROM labs ORDER BY name ASC")
+            labs = c.fetchall()
+
+        if not labs:
+            ttk.Label(self.lab_list_container, text="🚫 لا توجد مخابر مسجلة حالياً.").pack()
+            return
+
+        for lab_id, name, address in labs:
+            card = tb.Frame(self.lab_list_container, padding=10, style="custom.light.TFrame")
+            card.pack(fill="x", pady=5, padx=5)
+
+            label_text = f"🔬 {name}\n📍 {address}"
+            ttk.Label(card, text=label_text, justify="right", anchor="w", font=("Segoe UI", 10)).pack(side="left", expand=True, fill="x")
+
+            ttk.Button(card, text="✏️ تعديل", style="Primary.TButton",
+                       command=lambda lid=lab_id: self._edit_lab_popup(lid)).pack(side="right", padx=5)
+
+    def _edit_lab_popup(self, lab_id):
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("SELECT name, address FROM labs WHERE id = ?", (lab_id,))
+            row = c.fetchone()
+
+        if not row:
+            self.show_message("error", "تعذر العثور على بيانات المخبر.")
+            return
+
+        old_name, old_address = row
+    
+        win = self.build_centered_popup("✏️ تعديل بيانات المخبر", 400, 220)
+
+        frame = tb.Frame(win, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="اسم المخبر:").grid(row=0, column=0, sticky="e", padx=5, pady=10)
+        name_entry = tb.Entry(frame, width=40)
+        name_entry.insert(0, old_name)
+        name_entry.grid(row=0, column=1, pady=10)
+
+        ttk.Label(frame, text="العنوان:").grid(row=1, column=0, sticky="e", padx=5, pady=10)
+        address_entry = tb.Entry(frame, width=40)
+        address_entry.insert(0, old_address)
+        address_entry.grid(row=1, column=1, pady=10)
+
+        def save_changes():
+            new_name = name_entry.get().strip()
+            new_address = address_entry.get().strip()
+
+            if not new_name:
+                self.show_message("warning", "يرجى إدخال اسم المخبر.")
+                return
+
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("UPDATE labs SET name = ?, address = ? WHERE id = ?", (new_name, new_address, lab_id))
+                conn.commit()
+
+            win.destroy()
+            self._reload_lab_list()
+            if hasattr(self, 'tab_frames') and "الأطباء" in self.tab_frames:
+                self._reload_doctor_tab()
+            elif hasattr(self, '_update_lab_checkbuttons'):
+                self._update_lab_checkbuttons()
+            self.show_message("success", "✅ تم تعديل بيانات المخبر بنجاح.")
+
+        def delete_lab():
+            if not self.show_custom_confirm("تأكيد الحذف", f"⚠️ هل تريد حذف المخبر '{old_name}'؟"):
+                return
+
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("DELETE FROM labs WHERE id = ?", (lab_id,))
+                conn.commit()
+
+            win.destroy()
+            self._reload_lab_list()
+            print("سيتم إعادة تحميل تبويب الأطباء أو تحديث قائمة المخابر فيه...")
+            if hasattr(self, 'tab_frames') and "الأطباء" in self.tab_frames:
+                self._reload_doctor_tab()
+            elif hasattr(self, '_update_lab_checkbuttons'):
+                self._update_lab_checkbuttons()
+            self.show_message("success", "✅ تم حذف المخبر.")
+
+        btns = tb.Frame(frame)
+        btns.grid(row=2, column=0, columnspan=2, pady=15)
+
+        # توسيط الأزرار
+        center_buttons = tb.Frame(btns)
+        center_buttons.pack(anchor="center")
+
+        ttk.Button(center_buttons, text="💾 حفظ", style="Green.TButton", command=save_changes)\
+            .pack(side="left", padx=10)
+
+        ttk.Button(center_buttons, text="🗑 حذف", style="warning.TButton", command=delete_lab)\
+            .pack(side="left", padx=10)
+
+        ttk.Button(center_buttons, text="❌ إغلاق", style="danger.TButton", command=win.destroy)\
+            .pack(side="left", padx=10)
 
     def _save_lab(self):
         name, address = [e.get().strip() for e in self.lab_entries]
@@ -1969,11 +2526,19 @@ class MedicalTransApp(tb.Window):
         c = conn.cursor()
         c.execute("INSERT INTO labs (name, address) VALUES (?, ?)", (name, address))
         conn.commit()
+
+        # ✅ تحديث تبويب الأطباء مباشرة إن وُجد
+        if hasattr(self, 'tab_frames') and "الأطباء" in self.tab_frames:
+            self._reload_doctor_tab()
+        elif hasattr(self, '_update_lab_checkbuttons'):
+            self._update_lab_checkbuttons()
+
         conn.close()
         for e in self.lab_entries:
             e.delete(0, tb.END)
 
         self.show_message("success", f"✅ تم حفظ المخبر: {name}")
+        self._reload_lab_list()
 
     def _load_driver_table_data(self):
         self._load_original_data(
@@ -1987,6 +2552,32 @@ class MedicalTransApp(tb.Window):
                WHERE employment_end_date IS NULL OR employment_end_date = '' 
                   OR date(employment_end_date) >= date('now')"""
         )
+
+    def _update_lab_checkbuttons(self):
+        try:
+            # إزالة المخابر القديمة
+            for widget in self.lab_vars.values():
+                if hasattr(widget, 'master'):
+                    widget.master.destroy()
+
+            self.lab_vars.clear()
+
+            # جلب المخابر من قاعدة البيانات
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("SELECT name FROM labs ORDER BY name ASC")
+                labs = [r[0] for r in c.fetchall()]
+
+            # إعادة إنشاء checkbuttons
+            row = 0
+            lab_frame = self.lab_vars_container  # يجب أن تحفظ مكان الإطار في المتغير هذا عند البناء الأول
+            for i, lab in enumerate(labs):
+                var = tk.BooleanVar()
+                cb = ttk.Checkbutton(lab_frame, text=lab, variable=var)
+                cb.grid(row=i // 3, column=i % 3, padx=5, pady=3, sticky="w")
+                self.lab_vars[lab] = var
+        except Exception as e:
+            print(f"حدث خطأ أثناء تحديث المخابر في تبويب الأطباء: {e}")
 
     def _load_current_drivers(self):
         with sqlite3.connect("medicaltrans.db") as conn:
@@ -2389,6 +2980,32 @@ class MedicalTransApp(tb.Window):
         self._load_car_data()
         self._refresh_driver_comboboxes()
         self._refresh_driver_comboboxes()
+
+    def _log_billing_record(self, doctor_name: str, lab_name: str, trip_date: str):
+        import sqlite3
+        import json
+
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            # 🔍 جلب بيانات الطبيب
+            c.execute("SELECT id, price_per_trip FROM doctors WHERE name = ?", (doctor_name,))
+            result = c.fetchone()
+
+            if not result:
+                return  # الطبيب غير موجود أو بدون سعر
+
+            doctor_id, price_per_trip = result
+
+            # ✅ فقط إذا كان لديه سعر معرف
+            if price_per_trip is None:
+                return
+
+            c.execute("""
+                INSERT INTO billing_records (doctor_id, doctor_name, lab_name, trip_date, price_per_trip)
+                VALUES (?, ?, ?, ?, ?)
+            """, (doctor_id, doctor_name, lab_name, trip_date, price_per_trip))
+
+            conn.commit()
 
     def _get_last_driver_id(self):
         with sqlite3.connect("medicaltrans.db") as conn:
@@ -3009,19 +3626,24 @@ class MedicalTransApp(tb.Window):
 
         # ===== جدول الإجازات المباشر =====
         vac_table_frame = tb.LabelFrame(frame, text="الإجازات الحالية", padding=10)
-        vac_table_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        vac_table_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        frame.rowconfigure(3, weight=1)  # للسماح بتمدد السطر رقم 3
 
         tree_frame = tb.Frame(vac_table_frame)
-        tree_frame.pack(fill="both", expand=True)
+        tree_frame.grid(row=0, column=0, sticky="nsew")
+        vac_table_frame.rowconfigure(0, weight=1)
+        vac_table_frame.columnconfigure(0, weight=1)
 
         columns = ("id", "person_type", "name", "start", "end", "notes")
-        self.vacation_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=5)
+        self.vacation_tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
         self.vacation_tree.column("id", width=0, stretch=False)
         self.vacation_tree.heading("id", text="")
-        self.vacation_tree.pack(side="left", fill="both", expand=True)
+        self.vacation_tree.grid(row=0, column=0, sticky="nsew")
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.vacation_tree.yview, style="TScrollbar")
-        vsb.pack(side="right", fill="y")
+        vsb.grid(row=0, column=1, sticky="ns")
         self.vacation_tree.configure(yscrollcommand=vsb.set)
 
         self.configure_tree_columns(self.vacation_tree, ["", "النوع", "الاسم", "من", "إلى", "ملاحظات"])
@@ -3037,7 +3659,7 @@ class MedicalTransApp(tb.Window):
         )
 
         bottom_controls = tb.Frame(vac_table_frame)
-        bottom_controls.pack(fill="x", pady=(10, 10))
+        bottom_controls.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 10))
 
         search_frame = tb.Frame(bottom_controls)
         search_frame.pack(side="left", padx=(10, 0), anchor="w")
@@ -3077,33 +3699,33 @@ class MedicalTransApp(tb.Window):
 
         vac_id, person_type, name, start_old, end_old, notes_old = values
 
-        edit_win = self.build_centered_popup("✏️ تعديل الإجازة", 450, 300)
+        edit_win = self.build_centered_popup("✏️ تعديل الإجازة", 500, 320)
 
         main_frame = tb.Frame(edit_win)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
         # النوع
-        ttk.Label(main_frame, text="النوع:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(main_frame, text="النوع:").grid(row=0, column=0, sticky="e", pady=5, padx=5)
         ttk.Label(main_frame, text=person_type).grid(row=0, column=1, sticky="w", pady=5, padx=5)
 
         # الاسم
-        ttk.Label(main_frame, text="الاسم:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Label(main_frame, text="الاسم:").grid(row=1, column=0, sticky="e", pady=5, padx=5)
         ttk.Label(main_frame, text=name).grid(row=1, column=1, sticky="w", pady=5, padx=5)
 
         # من تاريخ
-        ttk.Label(main_frame, text="من تاريخ (YYYY-MM-DD):").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(main_frame, text="من تاريخ:").grid(row=2, column=0, sticky="e", pady=5, padx=5)
         start_picker = CustomDatePicker(main_frame)
         start_picker.set(start_old)
         start_picker.grid(row=2, column=1, sticky="ew", pady=5, padx=5)
 
         # إلى تاريخ
-        ttk.Label(main_frame, text="إلى تاريخ (YYYY-MM-DD):").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Label(main_frame, text="إلى تاريخ:").grid(row=3, column=0, sticky="e", pady=5, padx=5)
         end_picker = CustomDatePicker(main_frame)
         end_picker.set(end_old)
         end_picker.grid(row=3, column=1, sticky="ew", pady=5, padx=5)
 
         # الوصف / الملاحظات
-        ttk.Label(main_frame, text="الوصف / الملاحظات:").grid(row=4, column=0, sticky="nw", pady=5)
+        ttk.Label(main_frame, text="الوصف / الملاحظات:").grid(row=4, column=0, sticky="ne", pady=5, padx=5)
         note_text = tb.Text(main_frame, height=3, wrap="word")
         note_text.grid(row=4, column=1, sticky="ew", pady=5, padx=5)
         note_text.insert("1.0", notes_old)
@@ -3139,8 +3761,10 @@ class MedicalTransApp(tb.Window):
 
         # زر الحفظ (نقل إلى صف جديد لتفادي التداخل)
         btn_frame = tb.Frame(main_frame)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=15, sticky="ew")
-        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(pady=5, ipadx=20, fill="x")
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=15)
+
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(side="left", padx=10, ipadx=20)
+        ttk.Button(btn_frame, text="❌ إغلاق", style="danger.TButton", command=edit_win.destroy).pack(side="left", padx=10, ipadx=20)
 
         main_frame.columnconfigure(1, weight=1)
 
@@ -3157,27 +3781,27 @@ class MedicalTransApp(tb.Window):
 
         event_id, title, desc, start_old, end_old = values
 
-        edit_win = self.build_centered_popup("✏️ تعديل العطلة", 500, 350)
+        edit_win = self.build_centered_popup("✏️ تعديل العطلة", 500, 300)
 
         main_frame = tb.Frame(edit_win)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
-
-        ttk.Label(main_frame, text="نوع العطلة:").grid(row=0, column=0, sticky="w", pady=5)
+    
+        ttk.Label(main_frame, text="نوع العطلة:").grid(row=0, column=0, sticky="e", pady=5, padx=5)
         title_combo = ttk.Combobox(main_frame, values=AUSTRIAN_HOLIDAYS, state="readonly", width=30, justify="left")
         title_combo.grid(row=0, column=1, sticky="ew", pady=5, padx=5)
         title_combo.set(title)
 
-        ttk.Label(main_frame, text="الوصف / الملاحظات:").grid(row=1, column=0, sticky="nw", pady=5)
+        ttk.Label(main_frame, text="الوصف / الملاحظات:").grid(row=1, column=0, sticky="ne", pady=5, padx=5)
         desc_text = tb.Text(main_frame, width=40, height=3, wrap="word")
         desc_text.grid(row=1, column=1, sticky="ew", pady=5, padx=5)
         desc_text.insert("1.0", desc)
 
-        ttk.Label(main_frame, text="من:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(main_frame, text="من:").grid(row=2, column=0, sticky="e", pady=5, padx=5)
         start_picker = CustomDatePicker(main_frame)
         start_picker.set(start_old)
         start_picker.grid(row=2, column=1, sticky="ew", pady=5, padx=5)
 
-        ttk.Label(main_frame, text="إلى:").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Label(main_frame, text="إلى:").grid(row=3, column=0, sticky="e", pady=5, padx=5)
         end_picker = CustomDatePicker(main_frame)
         end_picker.set(end_old)
         end_picker.grid(row=3, column=1, sticky="ew", pady=5, padx=5)
@@ -3201,7 +3825,7 @@ class MedicalTransApp(tb.Window):
             with sqlite3.connect("medicaltrans.db") as conn:
                 c = conn.cursor()
                 c.execute("""
-                    UPDATE calendar SET title = ?, description = ?, start_date = ?, end_date = ?
+                    UPDATE calendar_events SET title = ?, description = ?, start_date = ?, end_date = ?
                     WHERE id = ?
                 """, (new_title, new_desc, new_start, new_end, event_id))
                 conn.commit()
@@ -3211,8 +3835,10 @@ class MedicalTransApp(tb.Window):
             self.show_message("success", "✅ تم تعديل العطلة بنجاح.")
 
         btn_frame = tb.Frame(main_frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=15, sticky="ew")
-        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(fill="x", ipadx=20)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=15)
+
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_changes).pack(side="left", padx=10, ipadx=20)
+        ttk.Button(btn_frame, text="❌ إغلاق", style="danger.TButton", command=edit_win.destroy).pack(side="left", padx=10, ipadx=20)
 
         main_frame.columnconfigure(1, weight=1)
 
@@ -3609,6 +4235,7 @@ class MedicalTransApp(tb.Window):
         self.vac_name.set("")
         self.vac_start.entry.delete(0, tb.END)
         self.vac_end.entry.delete(0, tb.END)
+        self.vac_note_text.delete("1.0", "end")
 
         if hasattr(self, '_load_vacations_inline'):
             self._load_vacations_inline()
@@ -3767,27 +4394,28 @@ class MedicalTransApp(tb.Window):
             old_date = values[1].strip()
             old_amount = values[2].strip()
 
-            edit_win = self.build_centered_popup("📝 تعديل مصروف الوقود", 400, 280)
+            edit_win = self.build_centered_popup("📝 تعديل مصروف الوقود", 400, 250)
             frm = tb.Frame(edit_win, padding=20)
             frm.pack(fill="both", expand=True)
+            frm.columnconfigure(1, weight=1)
 
             # --- اسم السائق ---
-            ttk.Label(frm, text="اسم السائق:").pack(anchor="w")
+            ttk.Label(frm, text="اسم السائق:").grid(row=0, column=0, sticky="e", pady=5, padx=5)
             driver_entry = ttk.Combobox(frm, values=self.get_driver_names(), width=30)
             driver_entry.set(old_driver)
-            driver_entry.pack(anchor="w", pady=5)
+            driver_entry.grid(row=0, column=1, sticky="w", pady=5)
 
             # --- التاريخ ---
-            ttk.Label(frm, text="التاريخ:").pack(anchor="w")
+            ttk.Label(frm, text="التاريخ:").grid(row=1, column=0, sticky="e", pady=5, padx=5)
             date_picker = CustomDatePicker(frm)
             date_picker.set(old_date)
-            date_picker.pack(anchor="w", pady=5)
+            date_picker.grid(row=1, column=1, sticky="w", pady=5)
 
             # --- المبلغ ---
-            ttk.Label(frm, text="المبلغ (€):").pack(anchor="w")
+            ttk.Label(frm, text="المبلغ (€):").grid(row=2, column=0, sticky="e", pady=5, padx=5)
             amount_entry = tb.Entry(frm)
             amount_entry.insert(0, old_amount)
-            amount_entry.pack(anchor="w", pady=5)
+            amount_entry.grid(row=2, column=1, sticky="w", pady=5)
 
             # --- حفظ التعديل ---
             def save_edit():
@@ -3842,9 +4470,13 @@ class MedicalTransApp(tb.Window):
 
             # --- الأزرار ---
             btns = tb.Frame(frm)
-            btns.pack(pady=10)
-            ttk.Button(btns, text="💾 حفظ", style="Green.TButton", command=save_edit).pack(side="left", padx=10, ipadx=15)
-            ttk.Button(btns, text="❌ إلغاء", style="Orange.TButton", command=edit_win.destroy).pack(side="left", padx=10, ipadx=15)
+            btns.grid(row=3, column=0, columnspan=2, pady=15)
+
+            ttk.Button(btns, text="💾 حفظ", style="Green.TButton", command=save_edit)\
+                .pack(side="left", padx=10, ipadx=15)
+
+            ttk.Button(btns, text="❌ إغلاق", style="danger.TButton", command=edit_win.destroy)\
+                .pack(side="left", padx=10, ipadx=15)
 
         ttk.Button(center_buttons, text="✏️ تعديل", style="Purple.TButton", command=open_edit_popup).pack(side="left", padx=10)
 
@@ -4225,25 +4857,28 @@ class MedicalTransApp(tb.Window):
         values = self.appointment_tree.item(selected[0], "values")
         appt_id, plate, appt_type, appt_date = values
 
-        win = self.build_centered_popup("📝 تعديل الموعد", 400, 250)
+        win = self.build_centered_popup("📝 تعديل الموعد", 350, 250)
 
         frm = tb.Frame(win, padding=20)
         frm.pack(fill="both", expand=True)
 
+        # رقم اللوحة أولاً
         ttk.Label(frm, text="رقم اللوحة:").grid(row=0, column=0, sticky="e", pady=5)
         plate_entry = tb.Entry(frm)
         plate_entry.insert(0, plate)
         plate_entry.grid(row=0, column=1, pady=5)
 
-        ttk.Label(frm, text="نوع الموعد:").grid(row=1, column=0, sticky="e", pady=5)
-        type_entry = tb.Entry(frm)
-        type_entry.insert(0, appt_type)
-        type_entry.grid(row=1, column=1, pady=5)
-
-        ttk.Label(frm, text="تاريخ الموعد:").grid(row=2, column=0, sticky="e", pady=5)
+        # تاريخ الموعد ثانيًا
+        ttk.Label(frm, text="تاريخ الموعد:").grid(row=1, column=0, sticky="e", pady=5)
         date_picker = CustomDatePicker(frm)
         date_picker.set(appt_date)
-        date_picker.grid(row=2, column=1, pady=5)
+        date_picker.grid(row=1, column=1, pady=5)
+
+        # نوع الموعد ثالثًا
+        ttk.Label(frm, text="نوع الموعد:").grid(row=2, column=0, sticky="e", pady=5)
+        type_entry = tb.Entry(frm)
+        type_entry.insert(0, appt_type)
+        type_entry.grid(row=2, column=1, pady=5)
 
         def save_appointment_edit_changes():
             new_plate = plate_entry.get().strip()
@@ -4270,7 +4905,18 @@ class MedicalTransApp(tb.Window):
             self._check_appointments()
             self.show_message("success", "✅ تم تعديل الموعد بنجاح.")
 
-        ttk.Button(frm, text="💾 حفظ التعديلات", style="Green.TButton", command=save_appointment_edit_changes).grid(row=3, columnspan=2, pady=15)
+        # ✅ إطار الأزرار
+        btn_frame = tb.Frame(frm)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=15)
+
+        # أزرار متمركزة باستخدام grid داخل نفس الصف
+        ttk.Button(btn_frame, text="💾 حفظ التعديلات", style="Green.TButton", command=save_appointment_edit_changes)\
+            .grid(row=0, column=0, padx=10, ipadx=10)
+
+        ttk.Button(btn_frame, text="❌ إغلاق", style="danger.TButton", command=win.destroy)\
+            .grid(row=0, column=1, padx=10, ipadx=10)
+
+        btn_frame.pack_propagate(False)
 
     def _show_archived_appointments_window(self):
         win = self.build_centered_popup("📁 المواعيد المؤرشفة", 700, 450)
