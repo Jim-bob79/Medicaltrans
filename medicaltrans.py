@@ -2905,34 +2905,43 @@ class MedicalTransApp(tb.Window):
                 if key:
                     weekday_data[key] = time
 
-        for key, label in [("mon", "الإثنين"), ("tue", "الثلاثاء"), ("wed", "الأربعاء"),
-                            ("thu", "الخميس"), ("fri", "الجمعة")]:
-            raw_value = weekday_data[key] or ""
-            has_time = bool(raw_value.strip())
-            day_var = tk.BooleanVar(value=has_time)
+            for key, label in [("mon", "الإثنين"), ...]:
+                raw_value = weekday_data[key] or ""
+                has_time = bool(raw_value.strip())
+                day_var = tk.BooleanVar(value=has_time)
 
-            initial_type = ""
-            from_time = ""
-            to_time = ""
-            for option in time_options:
-                if raw_value.strip().startswith(option):
-                    initial_type = option
-                    rest = raw_value[len(option):].strip()
-                    if option == "من - إلى" and " - " in rest:
-                        from_time, to_time = map(str.strip, rest.split(" - ", 1))
-                    elif option in ["حتى الساعة", "بعد الساعة"]:
-                        from_time = rest
-                    break
-            type_var = tk.StringVar(value=initial_type.strip())
-            from_var = tk.StringVar(value=from_time.strip())
-            to_var = tk.StringVar(value=to_time.strip())
-            type_cb, from_cb, to_cb = self.create_dynamic_time_row(center_col, label, day_var, type_var, from_var, to_var, entries["phone"])
-            self.edit_doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
+                initial_type, from_time, to_time = "", "", ""
+                for option in time_options:
+                    if raw_value.strip().startswith(option):
+                        initial_type = option
+                        rest = raw_value[len(option):].strip()
+                        if option == "من - إلى" and " - " in rest:
+                            from_time, to_time = map(str.strip, rest.split(" - ", 1))
+                        elif option in ["حتى الساعة", "بعد الساعة"]:
+                            from_time = rest
+                        break
 
-            if has_time:
-                # أجبر تفعيل اليوم ثم الحقول
-                day_var.set(True)
-                self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
+                print(f"{key=}, {raw_value=}, {initial_type=}, {from_time=}, {to_time=}")
+                print(f"initial_type repr: {repr(initial_type.strip())}")
+
+                type_var = tk.StringVar()
+                type_var.set(initial_type.strip())
+                from_var = tk.StringVar()
+                from_var.set(from_time.strip())
+                to_var = tk.StringVar()
+                to_var.set(to_time.strip())
+
+                print(f"type_var={repr(type_var.get())}, from_var={repr(from_var.get())}, to_var={repr(to_var.get())}")
+    
+                type_cb, from_cb, to_cb = self.create_dynamic_time_row(center_col, label, day_var, type_var, from_var, to_var, entries["phone"])
+                print("Combo values:", type_cb['values'])
+                print("type_var in values?", type_var.get() in type_cb['values'])
+
+                self.edit_doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
+
+                if has_time:
+                    day_var.set(True)
+                    self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
 
         tb.Label(right_col, text="📦 المواد:").pack(anchor="w")
         material_frame = tb.Frame(right_col)
