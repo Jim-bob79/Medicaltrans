@@ -2401,8 +2401,31 @@ class MedicalTransApp(tb.Window):
             type_cb, from_cb, to_cb = self.create_dynamic_time_row(
                 weekday_col, label, day_var, type_var, from_var, to_var, self.doctor_entries["phone"]
             )
-                        
+
+            # تخزين المتغيرات
             self.doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
+
+            def update_state(*args, d=day_var, t=type_var, fc=from_cb, tc=to_cb, cb=type_cb, fv=from_var, tv=to_var):
+                is_active = d.get()
+                cb.config(state="readonly" if is_active else "disabled")
+                fc.config(state="normal" if is_active and t.get() in ["من - إلى", "حتى الساعة", "بعد الساعة"] else "disabled")
+                tc.config(state="normal" if is_active and t.get() == "من - إلى" else "disabled")
+                if not is_active:
+                    t.set("")
+                    fv.set("")
+                    tv.set("")
+
+            # ربط تغيير حالة اليوم
+            day_var.trace_add("write", update_state)
+
+            # ربط تغيير نوع الوقت بشرط أن يكون اليوم مفعلاً
+            def on_type_change(*_, d=day_var, t=type_var, fc=from_cb, tc=to_cb):
+                if d.get():
+                    self.update_time_fields(t, fc, tc, self.doctor_entries["phone"])
+            type_var.trace_add("write", on_type_change)
+
+            # تهيئة الحالة الابتدائية
+            update_state()
 
         # === المواد والمخابر والسعر في العمود الأيمن ===
         right_row = 0
@@ -2685,6 +2708,7 @@ class MedicalTransApp(tb.Window):
                 self.show_message("warning", f"❗ يجب اختيار نوع الوقت ليوم {label}.")
                 return
 
+            # تحقق دقيق حسب النوع المحدد
             if typ == "من - إلى":
                 if not f or not t:
                     self.show_message("warning", f"❗ يرجى تحديد الوقت من وإلى ليوم {label}.")
@@ -2970,17 +2994,26 @@ class MedicalTransApp(tb.Window):
                 # تخزين المتغيرات
                 self.edit_doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
 
-                def update_state(*args):
-                    state = "normal" if day_var.get() else "disabled"
-                    type_cb.config(state=state)
-                    from_cb.config(state=state)
-                    to_cb.config(state=state)
-                day_var.trace_add("write", lambda *a: update_state())
-                update_state()
+                def update_state(*args, d=day_var, t=type_var, fc=from_cb, tc=to_cb, cb=type_cb, fv=from_var, tv=to_var):
+                    is_active = d.get()
+                    cb.config(state="readonly" if is_active else "disabled")
+                    fc.config(state="normal" if is_active and t.get() in ["من - إلى", "حتى الساعة", "بعد الساعة"] else "disabled")
+                    tc.config(state="normal" if is_active and t.get() == "من - إلى" else "disabled")
+                    if not is_active:
+                        t.set("")
+                        fv.set("")
+                        tv.set("")
 
-                if has_time:
-                    day_var.set(True)
-                    self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
+                day_var.trace_add("write", update_state)
+
+                # ربط تغيير نوع الوقت، لكن فقط إن كان اليوم مفعلاً
+                def on_type_change(*_):
+                    if day_var.get():
+                        self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
+                type_var.trace_add("write", on_type_change)
+
+                # تفعيل الحقول بناءً على حالة البداية
+                update_state()
 
                 # (يمكنك إجراء الطباعة هنا إذا أردت debug)
                 print(f"type_var={repr(type_var.get())}, from_var={repr(from_var.get())}, to_var={repr(to_var.get())}")
@@ -3035,26 +3068,64 @@ class MedicalTransApp(tb.Window):
             }
 
             weekday_updates = []
+            weekday_labels = {
+                "mon": "الإثنين", "tue": "الثلاثاء", "wed": "الأربعاء", "thu": "الخميس", "fri": "الجمعة"
+            }
+
+            # تحقق من صلاحية التحديدات ثم جهّز النصوص
             for key in ["mon", "tue", "wed", "thu", "fri"]:
                 active, typ, from_val, to_val, from_cb, to_cb = self.edit_doctor_weekday_vars[key]
+                
                 if active.get():
+                    if not typ.get().strip():
+                        self.show_message("warning", f"❗ يجب اختيار نوع الوقت ليوم {weekday_labels[key]}.")
+                        return
+
                     if typ.get() == "من - إلى":
                         if from_val.get() and to_val.get():
                             weekday_updates.append(f"{typ.get()} {from_val.get()} - {to_val.get()}")
                         else:
-                            weekday_updates.append(typ.get())
+                            weekday_updates.append(typ.get())  # قد ترغب بمنع هذا أيضًا
+                    elif typ.get() in ["حتى الساعة", "بعد الساعة"]:
+                        if from_val.get():
+                            weekday_updates.append(f"{typ.get()} {from_val.get()}")
+                        else:
+                            weekday_updates.append(typ.get())  # قد ترغب أيضًا بتحذير هنا
+                    elif typ.get() == "عند الاتصال":
+                        weekday_updates.append(f"{typ.get()} ({entries['phone'].get().strip()})")
                     else:
-                        weekday_updates.append(f"{typ.get()} {from_val.get()}" if from_val.get() else typ.get())
+                        weekday_updates.append(typ.get())
                 else:
-                    weekday_updates.append("")
+                    weekday_updates.append("")  # يوم غير مفعل
 
             with sqlite3.connect("medicaltrans.db") as conn:
                 c = conn.cursor()
+                # تجهيز الأعمدة الجديدة
+                weekday_labels = {
+                    "mon": "الإثنين", "tue": "الثلاثاء", "wed": "الأربعاء", "thu": "الخميس", "fri": "الجمعة"
+                }
+                selected_days = []
+                selected_times = []
+                for key, (active, typ, from_val, to_val, _, _) in self.edit_doctor_weekday_vars.items():
+                    if active.get():
+                        label = weekday_labels.get(key, key)
+                        selected_days.append(label)
+                        if typ.get() == "من - إلى":
+                            selected_times.append(f"{typ.get()} {from_val.get()} - {to_val.get()}")
+                        elif typ.get() in ["حتى الساعة", "بعد الساعة"]:
+                            selected_times.append(f"{typ.get()} {from_val.get()}")
+                        elif typ.get() == "عند الاتصال":
+                            selected_times.append(f"{typ.get()} ({entries['phone'].get().strip()})")
+                        else:
+                            selected_times.append(typ.get())
+
+                # تحديث شامل
                 c.execute("""
                     UPDATE doctors SET
                         name=?, phone=?, street=?, city=?, zip_code=?,
                         materials=?, labs=?, price_per_trip=?,
-                        mon_time=?, tue_time=?, wed_time=?, thu_time=?, fri_time=?
+                        mon_time=?, tue_time=?, wed_time=?, thu_time=?, fri_time=?,
+                        weekdays=?, weekday_times=?
                     WHERE id=?
                 """, (
                     new_values["name"], new_values["phone"], new_values["street"],
@@ -3062,6 +3133,8 @@ class MedicalTransApp(tb.Window):
                     new_values["materials"], new_values["labs"],
                     new_values["price_per_trip"],
                     *weekday_updates,
+                    "\n".join(selected_days),
+                    "\n".join(selected_times),
                     doctor_id
                 ))
                 conn.commit()
