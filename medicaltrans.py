@@ -2970,6 +2970,14 @@ class MedicalTransApp(tb.Window):
                 # تخزين المتغيرات
                 self.edit_doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
 
+                def update_state(*args):
+                    state = "normal" if day_var.get() else "disabled"
+                    type_cb.config(state=state)
+                    from_cb.config(state=state)
+                    to_cb.config(state=state)
+                day_var.trace_add("write", lambda *a: update_state())
+                update_state()
+
                 if has_time:
                     day_var.set(True)
                     self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
@@ -3038,7 +3046,7 @@ class MedicalTransApp(tb.Window):
                     else:
                         weekday_updates.append(f"{typ.get()} {from_val.get()}" if from_val.get() else typ.get())
                 else:
-                    weekday_updates.append(None)
+                    weekday_updates.append("")
 
             with sqlite3.connect("medicaltrans.db") as conn:
                 c = conn.cursor()
