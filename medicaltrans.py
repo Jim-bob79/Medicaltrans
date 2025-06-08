@@ -25,6 +25,14 @@ def super_normalize(text):
     text = text.replace('\u2013', '-').replace('\u2014', '-').replace('\u2212', '-')
     return text.strip()
 
+def best_match_option(val):
+    valid_options = ["حتى الساعة", "من - إلى", "بعد الساعة", "عند الاتصال", "بدون موعد"]
+    val = super_normalize(val)
+    for opt in valid_options:
+        if val.startswith(super_normalize(opt)):
+            return opt
+    return None
+
 AUSTRIAN_HOLIDAYS = [
     "رأس السنة", "عيد الغطاس", "الجمعة العظيمة", "عيد الفصح", "عيد العمال",
     "عيد الصعود", "عيد الجسد", "العيد الوطني", "عيد جميع القديسين",
@@ -2393,6 +2401,7 @@ class MedicalTransApp(tb.Window):
             type_cb, from_cb, to_cb = self.create_dynamic_time_row(
                 weekday_col, label, day_var, type_var, from_var, to_var, self.doctor_entries["phone"]
             )
+                        
             self.doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
 
         # === المواد والمخابر والسعر في العمود الأيمن ===
@@ -2834,14 +2843,6 @@ class MedicalTransApp(tb.Window):
         # ✅ تفعيل Tooltip لعرض النص الكامل عند المرور على الخلايا الطويلة
         self._attach_tooltip_to_tree(self.doctor_tree)
 
-    def best_match_option(val):
-        valid_options = ["حتى الساعة", "من - إلى", "بعد الساعة", "عند الاتصال", "بدون موعد"]
-        val = super_normalize(val)
-        for opt in valid_options:
-            if val.startswith(super_normalize(opt)):
-                return opt
-        return None
-
     def _edit_doctor_popup(self, doctor_id):
         import json
         import sqlite3
@@ -2931,9 +2932,10 @@ class MedicalTransApp(tb.Window):
                 has_time = bool(raw_value.strip())
                 day_var = tk.BooleanVar(value=has_time)
 
+                # استخراج نوع الوقت وباقي الحقول
                 initial_type, from_time, to_time = "", "", ""
-
                 opt = best_match_option(raw_value)
+                initial_type = opt if opt else ""
                 if opt and super_normalize(raw_value).startswith(super_normalize(opt)):
                     initial_type = opt
                     rest = raw_value[len(opt):].strip()
@@ -2942,36 +2944,46 @@ class MedicalTransApp(tb.Window):
                     elif opt in ["حتى الساعة", "بعد الساعة"]:
                         from_time = rest
 
-                print(f"{key=}, {raw_value=}, {initial_type=}, {from_time=}, {to_time=}")
-                print(f"initial_type repr: {repr(initial_type.strip())}")
-
+                # إنشاء المتغيرات
                 type_var = tk.StringVar()
-                type_var.set(normalize_arabic(initial_type))
                 from_var = tk.StringVar()
-                from_var.set(from_time.strip())
                 to_var = tk.StringVar()
+                from_var.set(from_time.strip())
                 to_var.set(to_time.strip())
 
-                print(f"type_var={repr(type_var.get())}, from_var={repr(from_var.get())}, to_var={repr(to_var.get())}")
+                # إنشاء الكمبوبوكسات مرة واحدة فقط!
+                type_cb, from_cb, to_cb = self.create_dynamic_time_row(
+                    center_col, label, day_var, type_var, from_var, to_var, entries["phone"]
+                )
 
-                type_cb, from_cb, to_cb = self.create_dynamic_time_row(center_col, label, day_var, type_var, from_var, to_var, entries["phone"])
-                print("Combo values:", type_cb['values'])
-                # Normalize all values in Combo for comparison
-                print("type_var in values?", normalize_arabic(type_var.get()) in [normalize_arabic(val) for val in type_cb['values']])
+                # تعيين القيمة المرجعية الصحيحة (مباشرة بعد البناء)
+                target = None
+                for v in type_cb['values']:
+                    if super_normalize(v) == super_normalize(initial_type):
+                        target = v
+                        break
+                if target:
+                    type_var.set(target)
+                else:
+                    type_var.set(super_normalize(initial_type))
 
-                def print_unicode_points(label, text):
-                    print(f"{label}: {[hex(ord(c)) for c in text]}")
-
-                print_unicode_points("type_var", type_var.get())
-                for val in type_cb['values']:
-                    print_unicode_points("Combo value", val)
-                
+                # تخزين المتغيرات
                 self.edit_doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
 
                 if has_time:
                     day_var.set(True)
                     self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
 
+                # (يمكنك إجراء الطباعة هنا إذا أردت debug)
+                print(f"type_var={repr(type_var.get())}, from_var={repr(from_var.get())}, to_var={repr(to_var.get())}")
+                print("Combo values:", type_cb['values'])
+                print("type_var in values?", super_normalize(type_var.get()) in [super_normalize(val) for val in type_cb['values']])
+                def print_unicode_points(label, text):
+                    print(f"{label}: {[hex(ord(c)) for c in text]}")
+                print_unicode_points("type_var", type_var.get())
+                for val in type_cb['values']:
+                    print_unicode_points("Combo value", val)
+                
         tb.Label(right_col, text="📦 المواد:").pack(anchor="w")
         material_frame = tb.Frame(right_col)
         material_frame.pack(anchor="w")
