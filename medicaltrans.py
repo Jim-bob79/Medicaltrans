@@ -2906,16 +2906,16 @@ class MedicalTransApp(tb.Window):
                     weekday_data[key] = time
 
         for key, label in [("mon", "الإثنين"), ("tue", "الثلاثاء"), ("wed", "الأربعاء"),
-                                   ("thu", "الخميس"), ("fri", "الجمعة")]:
+                            ("thu", "الخميس"), ("fri", "الجمعة")]:
             raw_value = weekday_data[key] or ""
-            day_var = tk.BooleanVar(value=bool(raw_value.strip()))
+            has_time = bool(raw_value.strip())
+            day_var = tk.BooleanVar(value=has_time)
 
             initial_type = ""
             from_time = ""
             to_time = ""
-
             for option in time_options:
-                if raw_value.startswith(option):
+                if raw_value.strip().startswith(option):
                     initial_type = option
                     rest = raw_value[len(option):].strip()
                     if option == "من - إلى" and " - " in rest:
@@ -2923,11 +2923,16 @@ class MedicalTransApp(tb.Window):
                     elif option in ["حتى الساعة", "بعد الساعة"]:
                         from_time = rest
                     break
-            type_var = tk.StringVar(value=initial_type)
-            from_var = tk.StringVar(value=from_time)
-            to_var = tk.StringVar(value=to_time)
+            type_var = tk.StringVar(value=initial_type.strip())
+            from_var = tk.StringVar(value=from_time.strip())
+            to_var = tk.StringVar(value=to_time.strip())
             type_cb, from_cb, to_cb = self.create_dynamic_time_row(center_col, label, day_var, type_var, from_var, to_var, entries["phone"])
             self.edit_doctor_weekday_vars[key] = (day_var, type_var, from_var, to_var, from_cb, to_cb)
+
+            if has_time:
+                # أجبر تفعيل اليوم ثم الحقول
+                day_var.set(True)
+                self.update_time_fields(type_var, from_cb, to_cb, entries["phone"])
 
         tb.Label(right_col, text="📦 المواد:").pack(anchor="w")
         material_frame = tb.Frame(right_col)
