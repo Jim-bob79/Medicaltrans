@@ -42,15 +42,65 @@ def generate_driver_day_schedule(
 
 
 def generate_weekly_schedule(driver_name, start_date_str, weekly_entries, output_path):
+    import sqlite3
+
     c = canvas.Canvas(output_path, pagesize=landscape(A4))
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-    weekdays = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
+    conn = sqlite3.connect("medicaltrans.db")
+    cursor = conn.cursor()
 
-    for i in range(5):
-        date = start_date + timedelta(days=i)
-        date_str = date.strftime("%d/%m/%Y")
-        weekday_name = weekdays[i]
+    weekdays_map = {
+        0: "الإثنين", 1: "الثلاثاء", 2: "الأربعاء", 3: "الخميس", 4: "الجمعة"
+    }
+
+    for i in range(7):  # مرّ على كامل الأسبوع لتجاهل السبت/الأحد والعطل
+        current_date = start_date + timedelta(days=i)
+        weekday_index = current_date.weekday()
+
+        # ❌ تجاهل السبت (5) والأحد (6)
+        if weekday_index > 4:
+            continue
+
+        date_str = current_date.strftime("%Y-%m-%d")
+
+        # ❌ عطلة رسمية؟
+        cursor.execute("SELECT 1 FROM holidays WHERE date = ?", (date_str,))
+        if cursor.fetchone():
+            continue
+
+        # ❌ عطلة السائق؟
+        cursor.execute("""
+            SELECT 1 FROM vacations
+            WHERE name = ? AND ? BETWEEN from_date AND to_date
+        """, (driver_name, date_str))
+        if cursor.fetchone():
+            continue
+
+        # ❌ هل يوجد طبيب في إجازة في المهام؟
+        cursor.execute("""
+            SELECT doctor FROM driver_tasks
+            WHERE driver = ? AND date = ?
+        """, (driver_name, date_str))
+        doctors = cursor.fetchall()
+
+        skip_day = False
+        for (doc,) in doctors:
+            cursor.execute("""
+                SELECT 1 FROM vacations
+                WHERE name = ? AND ? BETWEEN from_date AND to_date
+            """, (doc, date_str))
+            if cursor.fetchone():
+                skip_day = True
+                break
+
+        if skip_day:
+            continue
+
+        # ✅ توليد الصفحة
         entries = weekly_entries.get(i, [])
-        generate_driver_day_schedule(driver_name, date_str, weekday_name, entries, c)
+        readable_date = current_date.strftime("%d/%m/%Y")
+        weekday_name = weekdays_map[weekday_index]
+        generate_driver_day_schedule(driver_name, readable_date, weekday_name, entries, c)
 
+    conn.close()
     c.save()
