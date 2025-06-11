@@ -1410,89 +1410,578 @@ class MedicalTransApp(tb.Window):
     def _build_main_tab(self):
         frame = tb.Frame(self.content_frame, padding=20)
 
-        # الإطار الأيسر لإدخال البيانات
+        # === الإطار الأيسر لإدارة Routes ===
         left_frame = tb.Frame(frame)
-        left_frame.pack(side="left", fill="y", padx=10, pady=10)
+        left_frame.pack(side="left", fill="y", padx=(10, 5), pady=10)
 
-        # عنصر اختيار السائق
-        ttk.Label(left_frame, text="👤 اختر السائق:").grid(row=0, column=0, sticky="w", pady=4)
-        self.main_driver_combo = ttk.Combobox(left_frame, values=self.get_driver_names(), state="readonly", width=35)
-        self.main_driver_combo.grid(row=0, column=1, pady=4, sticky="w")
-        self.main_driver_combo.bind("<<ComboboxSelected>>", lambda e: self._main_preview_load_driver())
+        # أزرار الإضافة والتعديل
+        btns_frame = tb.Frame(left_frame)
+        btns_frame.pack(fill="x", pady=(0, 10))
+        ttk.Button(btns_frame, text="➕ إضافة Route", style="Accent.TButton", command=self._add_route_popup).pack(side="left", padx=5)
+        ttk.Button(btns_frame, text="✏️ تعديل Route", command=self._edit_route_popup).pack(side="left", padx=5)
 
-        # زرار التنقل + عرض التاريخ
-        nav_frame = tb.Frame(left_frame)
-        nav_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        # === إطار تمرير لعرض البطاقات ===
+        cards_container = tb.Frame(left_frame)
+        cards_container.pack(fill="both", expand=True)
 
-        self.prev_day_btn = ttk.Button(nav_frame, text="⬅️", width=4, command=self._main_preview_prev_day)
-        self.prev_day_btn.pack(side="left", padx=5)
+        canvas = tb.Canvas(cards_container, borderwidth=0)
+        scrollbar = ttk.Scrollbar(cards_container, orient="vertical", command=canvas.yview, style="TScrollbar")
+        self.routes_card_frame = tb.Frame(canvas)
 
-        self.next_day_btn = ttk.Button(nav_frame, text="➡️", width=4, command=self._main_preview_next_day)
-        self.next_day_btn.pack(side="left", padx=5)
+        self.routes_card_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self.routes_card_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
 
-        self.day_label = ttk.Label(nav_frame, text="📅", font=("Segoe UI", 10, "bold"))
-        self.day_label.pack(side="left", padx=10)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-        # الإطار الأيمن لمعاينة ورقة A4
-        right_frame = tb.LabelFrame(frame, text="🖨️ معاينة ورقة A4", padding=10)
-        right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+        # === الإطار الأيمن: عرض تفاصيل Route المحددة ===
+        right_frame = tb.LabelFrame(frame, text="🚚 عرض Route", padding=10)
+        right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=10)
 
-        field_labels = [
-            "اسم الطبيب:", "اسم المخبر:", "اسم السائق:",
-            "تاريخ المهمة (YYYY-MM-DD):", "الوقت (مثال 08:00-08:30):",
-            "ملاحظات:", "عنوان الطبيب:"
-        ]
-        self.main_entries = []
-
-        for i, label_text in enumerate(field_labels):
-            row_num = i + 2
-            ttk.Label(left_frame, text=label_text).grid(row=row_num, column=0, sticky="w", pady=4)
-
-            if i == 0:  # اسم الطبيب
-                entry = ttk.Combobox(left_frame, values=self.get_doctor_names(), state="readonly", width=37)
-            elif i == 1:  # اسم المخبر
-                entry = ttk.Combobox(left_frame, values=self.get_lab_names(), state="readonly", width=37)
-            elif i == 2:  # اسم السائق
-                entry = ttk.Combobox(left_frame, values=self.get_driver_names(), state="readonly", width=37)
-            elif i == 3:  # تاريخ المهمة
-                entry = CustomDatePicker(left_frame)
-            else:  # الوقت، الملاحظات، العنوان
-                entry = tb.Entry(left_frame, width=40)
-            entry.grid(row=row_num, column=1, pady=4)
-            self.main_entries.append(entry)
-
-        # زر حفظ المهمة
-        save_row = len(field_labels) + 2
-        ttk.Button(
-            left_frame,
-            text="💾 حفظ المهمة",
-            style="Green.TButton",
-            command=self._save_main_task
-        ).grid(row=save_row, column=0, columnspan=2, pady=10)
-
-        # أزرار الجدول الأسبوعي و PDF
-        buttons_frame = ttk.Frame(left_frame)
-        buttons_frame.grid(row=save_row + 1, column=0, columnspan=2, pady=10)
-
-        ttk.Button(
-            buttons_frame,
-            text="📅 عرض الأسبوع الكامل",
-            style="Orange.TButton",
-            command=self._preview_week_schedule
-        ).pack(side="left", padx=5)
-
-        ttk.Button(
-            buttons_frame,
-            text="🖨️ توليد PDF",
-            style="Purple.TButton",
-            command=self._export_week_schedule
-        ).pack(side="left", padx=5)
-
-        # Canvas للمعاينة
-        self.preview_canvas = tb.Canvas(right_frame, bg="white", width=595, height=842)
-        self.preview_canvas.pack(expand=True)
+        self._refresh_route_cards()
 
         return frame
+
+    def _refresh_route_cards(self):
+        import sqlite3
+        from datetime import datetime
+
+        for widget in self.routes_card_frame.winfo_children():
+            widget.destroy()
+
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+            c.execute("SELECT id, name, date, driver FROM routes ORDER BY date")
+            routes = c.fetchall()
+            conn.close()
+        except Exception as e:
+            self.show_message("error", f"فشل تحميل Routes: {e}")
+            return
+
+        for route in routes:
+            route_id, name, date_str, driver = route
+
+            # تنسيق التاريخ
+            try:
+                date = datetime.strptime(date_str, "%Y-%m-%d")
+                readable_date = date.strftime("%d/%m/%Y")
+            except:
+                readable_date = date_str
+
+            card = tb.Frame(self.routes_card_frame, borderwidth=2, relief="groove", padding=8)
+            card.pack(fill="x", pady=5, padx=3)
+
+            ttk.Label(card, text=f"📛 {name}", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+            ttk.Label(card, text=f"📅 {readable_date}").pack(anchor="w")
+            ttk.Label(card, text=f"🚗 {driver}").pack(anchor="w")
+
+            card.bind("<Button-1>", lambda e, rid=route_id: self._select_route(rid))
+            for child in card.winfo_children():
+                child.bind("<Button-1>", lambda e, rid=route_id: self._select_route(rid))
+
+    def _select_route(self, route_id):
+        # هذه الدالة سيتم تنفيذها عند الضغط على بطاقة Route
+        # لاحقًا سنجعلها تعرض تفاصيل الـ Route في الجهة اليمنى
+        print(f"📦 Route المحددة ID = {route_id}")
+        # TODO: تحميل بيانات Route من القاعدة وعرضها في جدول عرض Route
+
+    def _edit_route_popup(self, route_id):
+        import sqlite3
+        from datetime import datetime
+
+        self._editing_route_id = route_id  # ← لتفعيل وضع التعديل لاحقًا أثناء الحفظ
+
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+
+            # جلب بيانات Route الأساسية
+            c.execute("SELECT name, date, driver FROM routes WHERE id = ?", (route_id,))
+            route_row = c.fetchone()
+            if not route_row:
+                self.show_message("error", "لم يتم العثور على بيانات Route.")
+                return
+
+            route_name, first_date_str, driver = route_row
+
+            # جلب جميع الأيام المرتبطة بنفس الاسم والسائق
+            c.execute("SELECT DISTINCT date FROM routes WHERE name = ? AND driver = ? ORDER BY date", (route_name, driver))
+            date_rows = c.fetchall()
+            self.route_days = [datetime.strptime(d[0], "%Y-%m-%d") for d in date_rows]
+
+            # جلب بيانات route_tasks لكل يوم
+            self.route_temp_data = {}
+            for day in self.route_days:
+                day_key = day.strftime("%Y-%m-%d")
+                c.execute("""
+                    SELECT name, time, lab, description, address, notes
+                    FROM route_tasks
+                    WHERE route_name = ? AND date = ? AND driver = ?
+                """, (route_name, day_key, driver))
+                rows = c.fetchall()
+                self.route_temp_data[day_key] = rows
+
+            conn.close()
+
+        except Exception as e:
+            self.show_message("error", f"حدث خطأ أثناء تحميل Route:\n{e}")
+            return
+
+        # فتح واجهة الإضافة لكنها ستتصرف كواجهة تعديل
+        self._add_route_popup()
+
+        # ملء الحقول بالبيانات القديمة
+        self._route_inputs["name_entry"].delete(0, "end")
+        self._route_inputs["name_entry"].insert(0, route_name)
+        self._route_inputs["driver_combo"].set(driver)
+        self._route_inputs["window"].title("✏️ تعديل Route")
+
+        self.current_route_in
+
+    def _add_route_popup(self):
+        import tkinter as tk
+        from datetime import datetime, timedelta
+
+        # === توليد الأيام إن لم تكن موجودة (أي في حالة "إضافة") ===
+        if not hasattr(self, "route_days") or not self.route_days:
+            today = datetime.today()
+            days_ahead = (7 - today.weekday() + 0) % 7  # أقرب إثنين قادم
+            next_monday = today + timedelta(days=days_ahead)
+
+            self.route_days = []
+            for i in range(5):
+                day = next_monday + timedelta(days=i)
+                if not self.is_holiday(day):
+                    self.route_days.append(day)
+
+            if not self.route_days:
+                self.show_message("warning", "لا توجد أيام متاحة هذا الأسبوع (عطل فقط)")
+                return
+
+            self.route_temp_data = {}  # فارغة في حالة الإضافة
+            self.current_route_index = 0
+
+        # === النافذة ===
+        win = self.build_centered_popup("➕ إضافة Route جديدة", 1100, 700)
+        self._route_popup = win
+
+        # === إطار علوي لإدخال المعلومات العامة ===
+        top_frame = tb.Frame(win)
+        top_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Label(top_frame, text="📛 اسم Route:").grid(row=0, column=0, sticky="w", padx=5)
+        route_name_entry = tb.Entry(top_frame, width=30)
+        route_name_entry.grid(row=0, column=1, padx=5)
+
+        ttk.Label(top_frame, text="📅 التاريخ:").grid(row=0, column=2, sticky="w", padx=5)
+        route_date_label = ttk.Label(top_frame, text="")
+        route_date_label.grid(row=0, column=3, padx=5)
+
+        ttk.Label(top_frame, text="🚗 السائق:").grid(row=0, column=4, sticky="w", padx=5)
+        driver_combo = ttk.Combobox(top_frame, values=self.get_driver_names(), state="readonly", width=25)
+        driver_combo.grid(row=0, column=5, padx=5)
+
+        # === الجدول ===
+        table_frame = tb.Frame(win)
+        table_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        columns = ("name", "time", "lab", "desc", "address", "notes")
+        column_names = ["الطبيب / المخبر", "الوقت", "المخبر", "Beschreibung", "العنوان", "الملاحظات/المواد"]
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
+        for col, name in zip(columns, column_names):
+            tree.heading(col, text=name)
+            tree.column(col, width=130)
+        tree.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        self._route_table = tree
+
+        # === زر إضافة صف يدوي ===
+        btn_add_row = ttk.Button(win, text="➕ إضافة صف يدوي", command=self._add_manual_route_row)
+        btn_add_row.pack(pady=(0, 5))
+
+        # === زر إعادة تحميل اليوم الحالي فقط
+        btn_reload_day = ttk.Button(win, text="🔁 إعادة تحميل اليوم", command=self._reload_route_day_data)
+        btn_reload_day.pack(pady=(0, 5))
+
+        # === أزرار تحريك الصفوف
+        btns_frame = tb.Frame(win)
+        btns_frame.pack(pady=(0, 5))
+
+        ttk.Button(btns_frame, text="⬆️ للأعلى", command=self._move_route_row_up).pack(side="left", padx=5)
+        ttk.Button(btns_frame, text="⬇️ للأسفل", command=self._move_route_row_down).pack(side="left", padx=5)
+
+        # === المعاينة ===
+        canvas_frame = tb.Frame(win)
+        canvas_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self.route_preview_canvas = tb.Canvas(canvas_frame, bg="white", width=842, height=595)
+        self.route_preview_canvas.pack(fill="both", expand=True)
+
+        # === التنقل ===
+        nav_frame = tb.Frame(win)
+        nav_frame.pack(fill="x", pady=(5, 10))
+
+        self.route_nav_label = ttk.Label(nav_frame, text="", font=("Segoe UI", 10, "bold"))
+        self.route_nav_label.pack(side="left", padx=10)
+
+        ttk.Button(nav_frame, text="⬅️ السابق", command=self._prev_route_day).pack(side="left", padx=5)
+        self._route_next_btn = ttk.Button(nav_frame, text="➡️ التالي", command=self._next_route_day)
+        self._route_next_btn.pack(side="left", padx=5)
+
+        self._route_save_btn = ttk.Button(nav_frame, text="💾 حفظ Route", command=self._save_full_route)
+        self._route_save_btn.pack(side="right", padx=10)
+
+        self._route_print_btn = ttk.Button(nav_frame, text="🖨️ طباعة Route", command=self._print_route_pdf)
+        self._route_print_btn.pack(side="right", padx=10)
+
+        # حفظ المراجع
+        self._route_inputs = {
+            "window": win,
+            "name_entry": route_name_entry,
+            "driver_combo": driver_combo,
+            "date_label": route_date_label
+        }
+
+        # === تحميل اليوم الأول ===
+        self._load_route_day()
+
+    def _load_route_day(self):
+        from datetime import datetime
+
+        tree = self._route_table
+        tree.delete(*tree.get_children())
+
+        current_date = self.route_days[self.current_route_index]
+        weekday_names = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
+        weekday_name = weekday_names[current_date.weekday()]
+        readable_date = current_date.strftime("%Y-%m-%d")
+
+        self.route_nav_label.config(text=f"📅 {weekday_name} - {readable_date}")
+        self._route_inputs["date_label"].config(text=f"{weekday_name} - {readable_date}")
+
+        # ملء الجدول بالأطباء الذين يعملون في هذا اليوم
+        weekday_key = ["mon", "tue", "wed", "thu", "fri"][current_date.weekday()]
+        doctors = self.get_doctors_by_weekday(weekday_key, current_date)
+        for doctor in doctors:
+            name = doctor["name"]
+            time = doctor["time"]
+            lab = doctor["lab"]
+            desc = doctor.get("desc", "")
+            address = doctor.get("address", "")
+            notes = doctor.get("notes", "")
+            tree.insert("", "end", values=(name, time, lab, desc, address, notes))
+
+        # تحميل تحويلات المخابر وإدراجها
+        lab_transfers = self.get_lab_transfers_by_weekday(weekday_key, current_date)
+        for lab in lab_transfers:
+            name = lab["name"]
+            address = lab["address"]
+            # الأعمدة الأخرى تُترك فارغة ليملأها المستخدم يدويًا
+            self._route_table.insert("", "end", values=(name, "", "", "", address, ""))
+
+        # معاينة مبدئية
+        self._draw_route_preview()
+
+    def _store_current_route_day(self):
+        tree = self._route_table
+        rows = []
+        for item in tree.get_children():
+            values = tree.item(item, "values")
+            rows.append(values)
+        self.route_temp_data[self.current_route_index] = rows
+    
+    def _next_route_day(self):
+        self._store_current_route_day()
+        if self.current_route_index < len(self.route_days) - 1:
+            self.current_route_index += 1
+            self._load_route_day()
+
+    def _prev_route_day(self):
+        self._store_current_route_day()
+        if self.current_route_index > 0:
+            self.current_route_index -= 1
+            self._load_route_day()
+
+    def _next_route_day(self):
+        # حفظ بيانات اليوم الحالي
+        day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
+        self.route_temp_data[day_key] = [self._route_table.item(i, "values") for i in self._route_table.get_children()]
+
+        if self.current_route_index + 1 < len(self.route_days):
+            self.current_route_index += 1
+            self._route_save_btn.pack_forget()
+            self._load_route_day()
+        else:
+            # إذا انتهت الأيام، أظهر زر الحفظ
+            self._route_next_btn.pack_forget()
+            self._route_save_btn.pack(side="right", padx=10)
+            self.show_message("info", "✅ تم إدخال جميع الأيام، يمكنك الآن حفظ Route")
+
+    def _prev_route_day(self):
+        if self.current_route_index == 0:
+            return  # لا يمكن الرجوع قبل الإثنين
+
+        # حفظ بيانات اليوم الحالي
+        day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
+        self.route_temp_data[day_key] = [self._route_table.item(i, "values") for i in self._route_table.get_children()]
+
+        self.current_route_index -= 1
+        self._route_next_btn.pack(side="left", padx=5)
+        self._route_save_btn.pack_forget()
+        self._load_route_day()
+
+    def _add_manual_route_row(self):
+        # إضافة صف فارغ يدوي، ويُميز في المعاينة بأن عمود الملاحظات يظهر بالأحمر
+        values = ["", "", "", "", "", ""]
+        self._route_table.insert("", "end", values=values, tags=("manual",))
+        self._draw_route_preview()
+
+    def _reload_route_day_data(self):
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+        weekday_key = ["mon", "tue", "wed", "thu", "fri"][current_date.weekday()]
+
+        # 🧹 احتفظ بالصفوف اليدوية فقط
+        existing = self.route_temp_data.get(day_key, [])
+        manual_rows = [row for row in existing if row[-1].strip() != ""]
+
+        # 🔄 تحميل الأطباء
+        doctors = self.get_doctors_by_weekday(weekday_key, current_date)
+        new_rows = []
+        for doctor in doctors:
+            row = (
+                doctor["name"],
+                doctor["time"],
+                doctor["lab"],
+                doctor["desc"],
+                doctor["address"],
+                doctor["notes"] or ""
+            )
+            new_rows.append(row)
+
+        # 🔄 تحميل المخابر
+        labs = self.get_lab_transfers_by_weekday(weekday_key, current_date)
+        for lab in labs:
+            row = (lab["name"], "", "", "", lab["address"], "")
+            new_rows.append(row)
+
+        # ✅ حفظ وفتح اليوم الحالي
+        self.route_temp_data[day_key] = new_rows + manual_rows
+        self._load_route_day()
+
+    def _move_route_row_up(self):
+        selected = self._route_table.selection()
+        if not selected:
+            return
+
+        index = self._route_table.index(selected[0])
+        if index == 0:
+            return
+
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+        rows = self.route_temp_data.get(day_key, [])
+
+        rows[index - 1], rows[index] = rows[index], rows[index - 1]
+        self.route_temp_data[day_key] = rows
+        self._load_route_day()
+        self._route_table.selection_set(self._route_table.get_children()[index - 1])
+
+    def _move_route_row_down(self):
+        selected = self._route_table.selection()
+        if not selected:
+            return
+
+        index = self._route_table.index(selected[0])
+        children = self._route_table.get_children()
+        if index >= len(children) - 1:
+            return
+
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+        rows = self.route_temp_data.get(day_key, [])
+
+        rows[index + 1], rows[index] = rows[index], rows[index + 1]
+        self.route_temp_data[day_key] = rows
+        self._load_route_day()
+        self._route_table.selection_set(self._route_table.get_children()[index + 1])
+
+    def _draw_route_preview(self):
+        canvas = self.route_preview_canvas
+        canvas.delete("all")
+
+        # إعدادات أفقية
+        w, h = 842, 595
+        x0, y0 = 20, 60
+        row_h = 28
+        col_widths = [120, 80, 100, 120, 180, 200]
+        headers = ["الطبيب / المخبر", "الوقت", "المخبر", "Beschreibung", "العنوان", "الملاحظات/المواد"]
+
+        # رأس
+        driver = self._route_inputs["driver_combo"].get().strip()
+        route_name = self._route_inputs["name_entry"].get().strip()
+        date_label = self.route_nav_label.cget("text")
+
+        canvas.create_text(30, 25, text=f"🚗 السائق: {driver}", anchor="w", font=("Arial", 10, "bold"))
+        canvas.create_text(w - 30, 25, text=f"📅 {date_label}", anchor="e", font=("Arial", 10, "bold"))
+        canvas.create_text(w//2, 45, text=f"📛 Route: {route_name}", anchor="center", font=("Arial", 10))
+
+        # رؤوس الأعمدة
+        x, y = x0, y0
+        for i, header in enumerate(headers):
+            canvas.create_rectangle(x, y, x + col_widths[i], y + row_h, fill="#ddd")
+            canvas.create_text(x + 4, y + row_h//2, text=header, anchor="w", font=("Arial", 9, "bold"))
+            x += col_widths[i]
+
+        # بيانات الصفوف
+        y += row_h
+        for row in self._route_table.get_children():
+            x = x0
+            values = self._route_table.item(row, "values")
+            tags = self._route_table.item(row, "tags")
+            for i, val in enumerate(values):
+                text = val if val else ""
+                color = "red" if i == 5 and "manual" in tags else "black"
+                canvas.create_rectangle(x, y, x + col_widths[i], y + row_h)
+                canvas.create_text(x + 4, y + row_h//2, text=text, anchor="w", fill=color, font=("Arial", 9))
+                x += col_widths[i]
+            y += row_h
+
+    def _save_full_route(self):
+        import sqlite3
+
+        name = self._route_inputs["name_entry"].get().strip()
+        driver = self._route_inputs["driver_combo"].get().strip()
+
+        if not name or not driver:
+            self.show_message("warning", "يرجى إدخال اسم Route واختيار السائق.")
+            return
+
+        editing_mode = hasattr(self, "_editing_route_id") and self._editing_route_id is not None
+
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+
+                if editing_mode:
+                    # 🧠 حذف فقط الأيام المرتبطة بـ route_id الأصلي
+                    c.execute("SELECT date FROM routes WHERE id = ?", (self._editing_route_id,))
+                    date_row = c.fetchone()
+                    if date_row:
+                        old_date = date_row[0]
+                        c.execute("DELETE FROM routes WHERE name = ? AND driver = ? AND date = ?", (name, driver, old_date))
+                        c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ? AND date = ?", (name, driver, old_date))
+                else:
+                    # حذف جميع الأيام المرتبطة بـ name + driver
+                    c.execute("DELETE FROM routes WHERE name = ? AND driver = ?", (name, driver))
+                    c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ?", (name, driver))
+
+                for date in self.route_days:
+                    day_key = date.strftime("%Y-%m-%d")
+                    rows = self.route_temp_data.get(day_key, [])
+                    if not rows:
+                        continue
+
+                    # إدخال في جدول routes
+                    c.execute("""
+                        INSERT INTO routes (name, date, driver)
+                        VALUES (?, ?, ?)
+                    """, (name, day_key, driver))
+                    route_id = c.lastrowid
+
+                    # إدخال في جدول route_tasks
+                    for row in rows:
+                        doctor, time, lab, desc, address, notes = row
+                        c.execute("""
+                            INSERT INTO route_tasks (route_name, date, driver, name, time, lab, description, address, notes)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (name, day_key, driver, doctor, time, lab, desc, address, notes))
+
+                conn.commit()
+
+            # تنظيف بعد الحفظ
+            if editing_mode:
+                del self._editing_route_id
+
+            self._route_popup.destroy()
+            self._refresh_route_cards()
+            self.show_message("success", "✅ تم حفظ Route بنجاح.")
+
+        except Exception as e:
+            self.show_message("error", f"حدث خطأ أثناء الحفظ:\n{e}")
+
+    def _print_route_pdf(self):
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.pdfgen import canvas
+        from tkinter import filedialog
+
+        if not self.route_days:
+            self.show_message("warning", "لا توجد بيانات Route للطباعة.")
+            return
+
+        # اختيار مسار حفظ الملف
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            title="حفظ Route كـ PDF"
+        )
+        if not file_path:
+            return
+
+        try:
+            c = canvas.Canvas(file_path, pagesize=landscape(A4))
+            width, height = landscape(A4)
+
+            for day in self.route_days:
+                day_key = day.strftime("%Y-%m-%d")
+                rows = self.route_temp_data.get(day_key, [])
+                if not rows:
+                    continue
+
+                # رأس الصفحة
+                c.setFont("Helvetica-Bold", 12)
+                c.drawString(30, height - 40, f"📅 {day.strftime('%A %d/%m/%Y')}   🚗 السائق: {self._route_inputs['driver_combo'].get().strip()}   📛 Route: {self._route_inputs['name_entry'].get().strip()}")
+
+                # رؤوس الأعمدة
+                headers = ["الطبيب / المخبر", "الوقت", "المخبر", "Beschreibung", "العنوان", "الملاحظات / المواد"]
+                col_widths = [110, 70, 80, 130, 190, 220]
+                x_positions = [30]
+                for w in col_widths[:-1]:
+                    x_positions.append(x_positions[-1] + w)
+                y = height - 70
+
+                c.setFont("Helvetica-Bold", 10)
+                for i, header in enumerate(headers):
+                    c.drawString(x_positions[i], y, header)
+                y -= 20
+
+                # محتوى الجدول
+                c.setFont("Helvetica", 9)
+                for row in rows:
+                    for i, text in enumerate(row):
+                        c.drawString(x_positions[i], y, str(text))
+                    y -= 18
+                    if y < 40:
+                        c.showPage()
+                        c.setFont("Helvetica-Bold", 10)
+                        y = height - 50
+                        for i, header in enumerate(headers):
+                            c.drawString(x_positions[i], y, header)
+                        y -= 20
+                        c.setFont("Helvetica", 9)
+
+                c.showPage()
+
+            c.save()
+            self.show_message("success", "✅ تم إنشاء ملف PDF بنجاح.")
+        except Exception as e:
+            self.show_message("error", f"فشل إنشاء PDF:\n{e}")
 
     def _main_preview_load_driver(self):
         import sqlite3
@@ -1566,9 +2055,12 @@ class MedicalTransApp(tb.Window):
 
         date = self.main_preview_days[self.main_preview_index]
         date_str = date.strftime("%Y-%m-%d")
-        readable_date = date.strftime("%A – %d/%m/%Y")
 
-        self.day_label.config(text=f"📅 {readable_date}")
+        weekday_names = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
+        weekday_name = weekday_names[date.weekday()]
+        readable_date = date.strftime("%d/%m/%Y")
+        self.day_label.config(text=f"{weekday_name} - {readable_date}")
+
 
         # ==== تحميل المهام من قاعدة البيانات ====
         tasks = []
@@ -1596,7 +2088,7 @@ class MedicalTransApp(tb.Window):
 
         # ==== رأس الصفحة ====
         canvas.create_text(50, 30, text=f"🚗 السائق: {self.main_preview_driver}", anchor="w", font=("Arial", 10, "bold"))
-        canvas.create_text(canvas_width - 50, 30, text=f"{readable_date}", anchor="e", font=("Arial", 10, "bold"))
+        canvas.create_text(canvas_width - 50, 30, text=f"{weekday_name} - {readable_date}", anchor="e", font=("Arial", 10, "bold"))
         canvas.create_text(canvas_width // 2, 50, text="🕓 ساعة بداية العمل: ____________", font=("Arial", 10))
 
         # ==== رسم رؤوس الأعمدة ====
@@ -3014,16 +3506,6 @@ class MedicalTransApp(tb.Window):
 
                 # تفعيل الحقول بناءً على حالة البداية
                 update_state()
-
-                # (يمكنك إجراء الطباعة هنا إذا أردت debug)
-                print(f"type_var={repr(type_var.get())}, from_var={repr(from_var.get())}, to_var={repr(to_var.get())}")
-                print("Combo values:", type_cb['values'])
-                print("type_var in values?", super_normalize(type_var.get()) in [super_normalize(val) for val in type_cb['values']])
-                def print_unicode_points(label, text):
-                    print(f"{label}: {[hex(ord(c)) for c in text]}")
-                print_unicode_points("type_var", type_var.get())
-                for val in type_cb['values']:
-                    print_unicode_points("Combo value", val)
                 
         tb.Label(right_col, text="📦 المواد:").pack(anchor="w")
         material_frame = tb.Frame(right_col)
@@ -5131,6 +5613,25 @@ class MedicalTransApp(tb.Window):
         if hasattr(self, '_load_vacations_inline'):
             self._load_vacations_inline()
 
+    def is_holiday(self, date_obj):
+        import sqlite3
+        date_str = date_obj.strftime("%Y-%m-%d")
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("SELECT 1 FROM holidays WHERE date = ?", (date_str,))
+                return c.fetchone() is not None
+        except Exception as e:
+            self.show_message("error", f"فشل التحقق من العطلة: {e}")
+            return False
+
+    def get_doctor_names(self):
+        import sqlite3
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("SELECT name FROM doctors ORDER BY name")
+            return [row[0] for row in c.fetchall()]
+
     def get_driver_names(self):
         with sqlite3.connect("medicaltrans.db") as conn:
             c = conn.cursor()
@@ -5143,6 +5644,97 @@ class MedicalTransApp(tb.Window):
                 ORDER BY name ASC
             """)
             return [row[0] for row in c.fetchall()]
+
+    def get_doctors_by_weekday(self, weekday_key, target_date):
+        import sqlite3
+        from datetime import datetime
+
+        today = datetime.today()
+        results = []
+
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+
+            # استعلام بيانات الأطباء الذين يعملون في هذا اليوم
+            c.execute("""
+                SELECT id, name, visit_type, price_per_trip, materials, labs, street, city, zip_code,
+                       weekday_times, weekday_labels
+                FROM doctors
+            """)
+            doctors = c.fetchall()
+    
+            for row in doctors:
+                (id_, name, visit_type, price, materials, labs, street, city, zip_code,
+                 weekday_times, weekday_labels) = row
+
+                # تحقق من وجود اليوم ضمن الأيام المفعلة
+                if weekday_labels and weekday_times:
+                    days = weekday_labels.strip().splitlines()
+                    times = weekday_times.strip().splitlines()
+                    label_to_key = {
+                        "الإثنين": "mon", "الثلاثاء": "tue", "الأربعاء": "wed",
+                        "الخميس": "thu", "الجمعة": "fri"
+                    }
+                    matched = False
+                    for day, time in zip(days, times):
+                        if label_to_key.get(day.strip()) == weekday_key:
+                            matched = True
+                            break
+                    if not matched:
+                        continue
+
+                # تحقق من عدم وجود إجازة للطبيب في هذا التاريخ
+                target_date_str = target_date.strftime("%Y-%m-%d")  # سيتم تعديل التاريخ لاحقًا من الخارج عند الحاجة
+                c.execute("SELECT 1 FROM doctor_leaves WHERE doctor_id = ? AND date = ?", (id_, target_date_str))
+                if c.fetchone():
+                    continue
+
+                full_address = f"{street}, {zip_code} {city}"
+                results.append({
+                    "name": name,
+                    "time": time,
+                    "lab": labs,
+                    "desc": visit_type,
+                    "address": full_address,
+                    "notes": materials
+                })
+
+            conn.close()
+            return results
+
+        except Exception as e:
+            self.show_message("error", f"فشل تحميل بيانات الأطباء: {e}")
+            return []
+
+    def get_lab_transfers_by_weekday(self, weekday_key, target_date):
+        import sqlite3
+
+        results = []
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+
+            # احصل على كل المخابر
+            c.execute("SELECT name, street, city, zip_code FROM labs")
+            labs = c.fetchall()
+
+            for lab in labs:
+                name, street, city, zip_code = lab
+                address = f"{street}, {zip_code} {city}"
+
+                # كل تحويل مخبر سيكون قابل لإدخال يدوي (مثل الوقت، الوصف، المخبر المستقبل)
+                results.append({
+                    "name": name,
+                    "address": address
+                })
+
+            conn.close()
+            return results
+
+        except Exception as e:
+            self.show_message("error", f"فشل تحميل المخابر: {e}")
+            return []
 
     def _refresh_main_comboboxes(self):
         if not hasattr(self, "main_entries") or not hasattr(self, "main_driver_combo"):
@@ -5158,13 +5750,6 @@ class MedicalTransApp(tb.Window):
             self.main_entries[2]["values"] = driver_names      # السائق
 
         self.main_driver_combo["values"] = driver_names
-
-    def get_doctor_names(self):
-        import sqlite3
-        with sqlite3.connect("medicaltrans.db") as conn:
-            c = conn.cursor()
-            c.execute("SELECT name FROM doctors ORDER BY name")
-            return [row[0] for row in c.fetchall()]
 
     def get_lab_names(self):
         import sqlite3
