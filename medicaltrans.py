@@ -10,8 +10,6 @@ from ttkbootstrap.widgets import DateEntry
 from custom_widgets import CustomDatePicker
 from ttkbootstrap.style import Style
 
-from pdf_generator import generate_weekly_schedule
-
 import unicodedata
 
 def super_normalize(text):
@@ -554,88 +552,6 @@ class MedicalTransApp(tb.Window):
             font=("Arial", 14, "bold"),
             fill=text_color
         )
-
-    def _export_week_schedule(self):
-        import sqlite3
-        from datetime import datetime, timedelta
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.pdfgen import canvas
-        from pdf_generator import generate_driver_day_schedule
-
-        driver = self.main_driver_combo.get().strip()
-        if not driver:
-            self.show_message("warning", "يرجى اختيار اسم السائق أولاً.")
-            return
-
-        filename = f"{driver}_جدول_الأسبوع.pdf"
-        c = canvas.Canvas(filename, pagesize=landscape(A4))
-        today = datetime.today()
-        start_of_week = today - timedelta(days=today.weekday())
-
-        weekdays_map = {
-            0: "الإثنين", 1: "الثلاثاء", 2: "الأربعاء", 3: "الخميس", 4: "الجمعة"
-        }
-
-        with sqlite3.connect("medicaltrans.db") as conn:
-            cur = conn.cursor()
-
-            for i in range(7):
-                current_date = start_of_week + timedelta(days=i)
-                weekday_index = current_date.weekday()
-                if weekday_index > 4:
-                    continue  # تجاهل السبت والأحد
-
-                date_str = current_date.strftime("%Y-%m-%d")
-
-                # عطلة رسمية؟
-                cur.execute("SELECT 1 FROM holidays WHERE date = ?", (date_str,))
-                if cur.fetchone():
-                    continue
-
-                # عطلة سائق؟
-                cur.execute("""
-                    SELECT 1 FROM vacations
-                    WHERE name = ? AND ? BETWEEN from_date AND to_date
-                """, (driver, date_str))
-                if cur.fetchone():
-                    continue
-
-                # تحقق من عطلات الأطباء
-                cur.execute("""
-                    SELECT doctor FROM driver_tasks
-                    WHERE driver = ? AND date = ?
-                """, (driver, date_str))
-                doctors = cur.fetchall()
-    
-                skip_day = False
-                for (doc,) in doctors:
-                    cur.execute("""
-                        SELECT 1 FROM vacations
-                        WHERE name = ? AND ? BETWEEN from_date AND to_date
-                    """, (doc, date_str))
-                    if cur.fetchone():
-                        skip_day = True
-                        break
-
-                if skip_day:
-                    continue
-
-                # جلب المهام
-                cur.execute("""
-                    SELECT doctor, time, materials, address
-                    FROM driver_tasks
-                    WHERE driver = ? AND date = ?
-                    ORDER BY time
-                """, (driver, date_str))
-                rows = cur.fetchall()
-
-                readable_date = current_date.strftime("%d/%m/%Y")
-                weekday_name = weekdays_map[weekday_index]
-
-                generate_driver_day_schedule(driver, readable_date, weekday_name, rows, c)
-
-        c.save()
-        self.show_message("info", f"✅ تم توليد الملف: {filename}")
 
     def is_on_vacation(self, name, date, person_type):
         with sqlite3.connect("medicaltrans.db") as conn:
@@ -1530,7 +1446,9 @@ class MedicalTransApp(tb.Window):
             return
 
         # فتح واجهة الإضافة لكنها ستتصرف كواجهة تعديل
+        self._suppress_autoload = True
         self._add_route_popup()
+        self._suppress_autoload = False
 
         # ملء الحقول بالبيانات القديمة
         self._route_inputs["name_entry"].delete(0, "end")
@@ -1649,7 +1567,8 @@ class MedicalTransApp(tb.Window):
         }
 
         # === تحميل اليوم الأول ===
-        self._load_route_day()
+        if not getattr(self, "_suppress_autoload", False):
+            self._load_route_day()
 
     def _load_route_day(self):
         from datetime import datetime
