@@ -12,6 +12,7 @@ from custom_widgets import CustomDatePicker
 from ttkbootstrap.style import Style
 
 import unicodedata
+from ttkwidgets.autocomplete import AutocompleteCombobox
 
 def super_normalize(text):
     if not text:
@@ -1543,6 +1544,8 @@ class MedicalTransApp(tb.Window):
 
         # === مكوّن البحث وقائمة الأطباء والمخابر ===
         ttk.Label(doctor_input_frame, text="🧑‍⚕️ الطبيب / المخبر:").grid(row=0, column=0, sticky="nw", padx=5, pady=5)
+        doctor_combo = ttk.Combobox(doctor_input_frame, state="readonly", width=35)
+        doctor_combo.grid(row=0, column=2, padx=5, sticky="w")
 
         # 🔍 حقل البحث
         search_entry = tb.Entry(doctor_input_frame, width=35)
@@ -1576,20 +1579,6 @@ class MedicalTransApp(tb.Window):
 
         search_entry.bind("<KeyRelease>", lambda e: self._update_doctor_checkbuttons(search_entry.get()))
 
-        ttk.Label(doctor_input_frame, text="🧪 المخبر:").grid(row=0, column=2, sticky="w", padx=5, pady=5)
-        lab_combo = ttk.Combobox(doctor_input_frame, values=[], state="readonly", width=25)
-        lab_combo.grid(row=0, column=3, padx=5)
-
-        ttk.Label(doctor_input_frame, text="📦 المواد:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-        self._materials_vars = []
-        materials_frame = tb.Frame(doctor_input_frame)
-        materials_frame.grid(row=1, column=1, columnspan=3, sticky="w", padx=5)
-
-        # ✅ حقل الملاحظات
-        ttk.Label(doctor_input_frame, text="📝 ملاحظات:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-        notes_entry = tb.Entry(doctor_input_frame, width=60)
-        notes_entry.grid(row=2, column=1, columnspan=3, sticky="w", padx=5)
-
         add_doctor_btn = ttk.Button(doctor_input_frame, text="➕ إضافة الطبيب إلى الجدول",
                                      command=lambda: self._add_selected_doctor_to_table())
         add_doctor_btn.grid(row=0, column=4, rowspan=3, padx=10)
@@ -1619,9 +1608,7 @@ class MedicalTransApp(tb.Window):
             "driver_combo": driver_combo,
             "date_label": route_date_label,
             "start_hour_combo": start_hour_combo,
-            "lab_combo": lab_combo,
-            "materials_frame": materials_frame,
-            "notes_entry": notes_entry  # ✅ تمت إضافته
+            "doctor_combo": doctor_combo  # ✅ هذا السطر يحل المشكلة
         }
 
         if not getattr(self, "_suppress_autoload", False):
@@ -1706,6 +1693,10 @@ class MedicalTransApp(tb.Window):
             var.trace_add("write", lambda *_args, l=label: self._on_doctor_lab_toggle(l))
             self._doctor_lab_vars[label] = var
 
+        # تعيين القيم في قائمة الطبيب / المخبر
+        self._route_inputs["doctor_combo"]["values"] = doctor_lab_items
+        self._route_inputs["doctor_combo"].set("")
+
         # داخل _load_route_day()
         driver_name = self._route_inputs["driver_combo"].get()
         target_date = current_date
@@ -1717,7 +1708,7 @@ class MedicalTransApp(tb.Window):
                 f"هل ترغب في متابعة هذا اليوم بنفس السائق؟"
             )
             if not answer:
-                self._route_inputs["driver_combo"].set("")  # تفريغ السائق، ليختار المستخدم آخر
+                self._route_inputs["driver_combo"].set("")  # تفريغ السائق
 
     def _on_doctor_lab_toggle(self, label):
         day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
@@ -1737,20 +1728,17 @@ class MedicalTransApp(tb.Window):
             row = (
                 doctor["name"],
                 doctor["time"],
-                doctor["lab"],
+                "",
                 doctor["desc"],
                 doctor["address"],
-                self._route_inputs["notes_entry"].get().strip()
+                ""
             )
 
         elif label.startswith("🧪 "):
             # مخبر
             lab_name = label.replace("🧪 ", "").strip()
             address = self.get_lab_address_by_name(lab_name)
-            row = (
-                lab_name, "", "", "", address,
-                self._route_inputs["notes_entry"].get().strip()
-            )
+            row = (lab_name, "", "", "", address,  "")                
         else:
             return
 
@@ -1808,10 +1796,10 @@ class MedicalTransApp(tb.Window):
             row = (
                 doctor["name"],
                 doctor["time"],
-                doctor["lab"],
+                "",
                 doctor["desc"],
                 doctor["address"],
-                self._route_inputs["notes_entry"].get().strip()
+                ""
             )
 
             day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
@@ -1832,7 +1820,7 @@ class MedicalTransApp(tb.Window):
             lab_name = selected.replace("🧪 ", "").strip()
             address = self.get_lab_address_by_name(lab_name)
 
-            row = (lab_name, "", "", "", address, self._route_inputs["notes_entry"].get().strip())
+            row = (lab_name, "", "", "", address, "")
 
             day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
             self.route_temp_data[day_key].append(row)
@@ -1879,14 +1867,10 @@ class MedicalTransApp(tb.Window):
                 return
 
             time = doctor["time"]
-            lab = self._route_inputs["lab_combo"].get()
+            lab = ""
             desc = doctor["desc"]
             address = doctor["address"]
-            notes_list = [item for item, var in self._materials_vars if var.get()]
-            custom_note = self._route_inputs["notes_entry"].get().strip()
-            if custom_note:
-                notes_list.append(custom_note)
-            notes = ", ".join(notes_list)
+            notes = ""
 
         elif selected.startswith("🧪 "):
             name = selected.replace("🧪 ", "")
@@ -1894,7 +1878,8 @@ class MedicalTransApp(tb.Window):
             lab = ""
             desc = ""
             address = self.get_lab_address_by_name(name)
-            notes = ", ".join(item for item, var in self._materials_vars if var.get())
+            notes = ""
+
         else:
             self.show_message("warning", "❌ يرجى اختيار طبيب أو مخبر من القائمة.")
             return
@@ -1910,11 +1895,10 @@ class MedicalTransApp(tb.Window):
         import sqlite3
         with sqlite3.connect("medicaltrans.db") as conn:
             c = conn.cursor()
-            c.execute("SELECT street, city, zip_code FROM labs WHERE name = ?", (name,))
+            c.execute("SELECT address FROM labs WHERE name = ?", (name,))
             row = c.fetchone()
             if row:
-                street, city, zip_code = row
-                return f"{city} {zip_code} - {street}"
+                return row[0]
             return ""
 
     def _reload_route_day_data(self):
@@ -2061,7 +2045,128 @@ class MedicalTransApp(tb.Window):
         # === خط أفقي أسفل الجدول
         canvas.create_line(0, y, total_width, y, fill="#000000")
 
+        def on_canvas_click(event):
+            x, y = event.x, event.y
+
+            for row_index, row in enumerate(rows):
+                cell_y = start_table_y + row_index * row_height
+                if cell_y <= y <= cell_y + row_height:
+                    if x_positions[0] <= x <= x_positions[1]:  # عمود الطبيب فقط
+                        self._show_doctor_selector(row_index, x_positions[0], cell_y)
+                        return
+
+        canvas.bind("<Button-1>", on_canvas_click)
+
         canvas.config(scrollregion=(0, 0, total_width, y + 20))
+
+    def _show_doctor_selector(self, row_index, x, y):
+        import tkinter as tk
+        from tkinter import ttk
+
+        canvas = self.route_preview_canvas
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+
+        if hasattr(self, "_active_doctor_combo"):
+            self._active_doctor_combo.destroy()
+
+        all_doctors = self.get_all_doctor_names()
+        all_labs = self.get_all_lab_names()
+
+        doctor_items = [f"🧑‍⚕️ {name}" for name in all_doctors]
+        lab_items = [f"🧪 {lab}" for lab in all_labs]
+        all_items = doctor_items + lab_items
+
+        # حساب عرض العمود الأول
+        canvas.update_idletasks()
+        canvas_width = canvas.winfo_width() or 1000
+        column_ratios = [1.4, 0.8, 0.8, 1.4, 2, 2.6]
+        total_ratio = sum(column_ratios)
+        col_widths = [int(canvas_width * (r / total_ratio)) for r in column_ratios]
+        doctor_col_width = col_widths[0]
+
+        combo_var = tk.StringVar()
+        combo = ttk.Combobox(canvas, textvariable=combo_var, values=all_items, width=40, state="normal")
+        combo.set("")  # لتفعيل الكتابة من البداية
+        canvas.create_window(x + 2, y + 2, anchor="nw", window=combo, width=doctor_col_width - 4)
+
+        def on_select(event=None):
+            selected = combo.get().strip()
+            if not selected or selected not in all_items:
+                del self.route_temp_data[day_key][row_index]
+            else:
+                if selected.startswith("🧑‍⚕️ "):
+                    name = selected.replace("🧑‍⚕️ ", "")
+                    doctor = self.get_doctor_by_name(name)
+                    if doctor:
+                        row = (
+                            doctor["name"],
+                            doctor["time"],
+                            "",
+                            doctor["desc"],
+                            doctor["address"],
+                            ""
+                        )
+                        self.route_temp_data[day_key][row_index] = row
+                elif selected.startswith("🧪 "):
+                    lab_name = selected.replace("🧪 ", "")
+                    address = self.get_lab_address_by_name(lab_name)
+                    row = (lab_name, "", "", "", address, "")
+                    self.route_temp_data[day_key][row_index] = row
+
+            combo.destroy()
+            self._draw_route_preview()
+
+        def filter_items(event):
+            typed = combo.get().lower()
+            matches = [item for item in all_items if typed in item.lower()]
+            combo["values"] = matches if matches else all_items
+            combo.event_generate("<Down>")  # يعيد فتح القائمة بعد الفلترة
+
+        combo.bind("<<ComboboxSelected>>", on_select)
+        combo.bind("<Return>", on_select)
+        combo.bind("<FocusOut>", lambda e: combo.destroy())
+        combo.bind("<KeyRelease>", filter_items)
+
+        combo.focus_set()
+        combo.after(100, lambda: combo.event_generate('<Down>'))  # ✅ فتح تلقائي
+
+        self._active_doctor_combo = combo
+
+    def get_all_doctor_names(self):
+        import sqlite3
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("SELECT name FROM doctors")
+                return [row[0] for row in c.fetchall()]
+        except Exception as e:
+            self.show_message("error", f"فشل جلب أسماء الأطباء: {e}")
+            return []
+
+    def get_doctor_by_name(self, name):
+        import sqlite3
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("""
+                    SELECT name, weekday_times, visit_type, labs, materials, street, city, zip_code
+                    FROM doctors WHERE name = ?
+                """, (name,))
+                row = c.fetchone()
+                if row:
+                    full_address = f"{row[7]} {row[6]}, {row[5]}"
+                    return {
+                        "name": row[0],
+                        "time": row[1],
+                        "desc": row[2],
+                        "lab": row[3],
+                        "notes": row[4],
+                        "address": full_address
+                    }
+        except Exception as e:
+            self.show_message("error", f"فشل جلب بيانات الطبيب '{name}': {e}")
+            return None
 
     def _save_full_route(self):
         import sqlite3
@@ -6049,7 +6154,7 @@ class MedicalTransApp(tb.Window):
                 if c.fetchone():
                     continue
 
-                full_address = f"{street}, {zip_code} {city}"
+                full_address = f"{zip_code} {city}, {street}"
                 results.append({
                     "name": name,
                     "time": time,
