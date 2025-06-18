@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import datetime
 import os
 from datetime import datetime, timedelta
@@ -26,7 +27,7 @@ def super_normalize(text):
     return text.strip()
 
 def best_match_option(val):
-    valid_options = ["حتى الساعة", "من - إلى", "بعد الساعة", "عند الاتصال", "بدون موعد"]
+    valid_options = ["bis", "von - bis", "ab", "nach Anruf", "Anschl."]
     val = super_normalize(val)
     for opt in valid_options:
         if val.startswith(super_normalize(opt)):
@@ -64,14 +65,14 @@ def get_weekday_times(weekday_vars: dict, validate: bool = False) -> list:
         f = from_var.get().strip()
         t = to_var.get().strip()
 
-        if typ == "من - إلى":
+        if typ == "von - bis":
             if validate:
                 if not f or not t:
                     raise ValueError(f"❗ يرجى تحديد الوقت من وإلى ليوم {label}.")
                 if f >= t:
                     raise ValueError(f"❗ الوقت 'إلى' يجب أن يكون بعد 'من' في يوم {label}.")
             results.append(f"{typ} {f} - {t}" if f and t else typ)
-        elif typ in ["حتى الساعة", "بعد الساعة"]:
+        elif typ in ["bis", "ab"]:
             if validate and not f:
                 raise ValueError(f"❗ يرجى تحديد الساعة ليوم {label}.")
             results.append(f"{typ} {f}" if f else typ)
@@ -253,6 +254,15 @@ def setup_database():
     except sqlite3.OperationalError: pass
     try: c.execute("ALTER TABLE billing_records ADD COLUMN total REAL")
     except sqlite3.OperationalError: pass
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS routes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            date TEXT,
+            driver TEXT
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -997,7 +1007,7 @@ class MedicalTransApp(tb.Window):
                     tree.heading(col_id, text="")
                 else:
                     # ✅ زيادة عرض الأعمدة الطويلة (مثل الأيام والأوقات)
-                    if label in ("🗓 الأيام", "⏰ الوقت"):
+                    if label in ("🗓 الأيام", "⏰ Zeit"):
                         width = 180
                     else:
                         width = default_col_width
@@ -1184,7 +1194,7 @@ class MedicalTransApp(tb.Window):
         win, tree, bottom_frame = self.build_centered_popup(
             "📅 جدول المهام الأسبوعي", 950, 500,
             columns=("day", "date", "doctor", "lab", "time", "materials", "address"),
-            column_labels=["اليوم", "التاريخ", "الطبيب", "المخبر", "الوقت", "الوصف", "العنوان"]
+            column_labels=["اليوم", "التاريخ", "الطبيب", "المخبر", "Zeit", "الوصف", "العنوان"]
         )
 
         tree._original_items = []
@@ -1491,8 +1501,6 @@ class MedicalTransApp(tb.Window):
         self._route_inputs["driver_combo"].set(driver)
         self._route_inputs["window"].title("✏️ تعديل Route")
 
-        self.current_route_in
-
     def _add_route_popup(self):
         import tkinter as tk
         from datetime import datetime, timedelta
@@ -1604,6 +1612,7 @@ class MedicalTransApp(tb.Window):
 
         self._route_inputs = {
             "window": win,
+            "popup": win,
             "name_entry": route_name_entry,
             "driver_combo": driver_combo,
             "date_label": route_date_label,
@@ -1645,7 +1654,7 @@ class MedicalTransApp(tb.Window):
                 doctor["name"],
                 doctor["time"],
                 doctor["lab"],
-                doctor["desc"],
+                doctor["materials"],
                 doctor["address"],
                 doctor["notes"] or ""
             )
@@ -1728,10 +1737,10 @@ class MedicalTransApp(tb.Window):
             row = (
                 doctor["name"],
                 doctor["time"],
-                "",
-                doctor["desc"],
+                doctor["lab"],
+                doctor["materials"],
                 doctor["address"],
-                ""
+                doctor["notes"] or ""
             )
 
         elif label.startswith("🧪 "):
@@ -1796,10 +1805,10 @@ class MedicalTransApp(tb.Window):
             row = (
                 doctor["name"],
                 doctor["time"],
-                "",
-                doctor["desc"],
+                doctor["lab"],
+                doctor["materials"],
                 doctor["address"],
-                ""
+                doctor["notes"] or ""
             )
 
             day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
@@ -1867,10 +1876,10 @@ class MedicalTransApp(tb.Window):
                 return
 
             time = doctor["time"]
-            lab = ""
+            lab = doctor["lab"]
             desc = doctor["desc"]
             address = doctor["address"]
-            notes = ""
+            notes = doctor["notes"]  # ✅ الحل هنا
 
         elif selected.startswith("🧪 "):
             name = selected.replace("🧪 ", "")
@@ -1884,7 +1893,14 @@ class MedicalTransApp(tb.Window):
             self.show_message("warning", "❌ يرجى اختيار طبيب أو مخبر من القائمة.")
             return
 
-        row = (name, time, lab, desc, address, notes)
+        row = (
+            doctor["name"],
+            time,
+            lab,
+            doctor["materials"],
+            address,
+            notes or ""
+        )
 
         day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
         self.route_temp_data.setdefault(day_key, []).append(row)
@@ -1964,7 +1980,8 @@ class MedicalTransApp(tb.Window):
         self._draw_route_preview()
 
     def _draw_route_preview(self):
-        import tkinter as tk  # ✅ نضمن وجود هذا داخل الدالة
+        import tkinter as tk
+        import tkinter.font as tkfont
 
         canvas = self.route_preview_canvas
         canvas.delete("all")
@@ -1972,7 +1989,6 @@ class MedicalTransApp(tb.Window):
         if not self.route_days:
             return
 
-        # === البيانات ===
         day = self.route_days[self.current_route_index]
         day_key = day.strftime("%Y-%m-%d")
         rows = self.route_temp_data.get(day_key, [])
@@ -1984,9 +2000,8 @@ class MedicalTransApp(tb.Window):
         driver = self._route_inputs["driver_combo"].get().strip()
         start_hour = self._route_inputs["start_hour_combo"].get().strip()
 
-        # === الأعمدة والثوابت ===
-        headers = ["الطبيب / المخبر", "الوقت", "المخبر", "Beschreibung", "العنوان", "ملاحظات/مواد"]
-        column_ratios = [1.4, 0.8, 0.8, 1.4, 2, 2.6]
+        headers = ["الطبيب / المخبر", "Zeit", "المخبر", "Beschreibung", "العنوان", "ملاحظات/مواد"]
+        column_ratios = [1.4, 1.2, 0.8, 1.4, 2, 2.6]
         total_ratio = sum(column_ratios)
 
         canvas.update_idletasks()
@@ -1998,86 +2013,175 @@ class MedicalTransApp(tb.Window):
             x_positions.append(x_positions[-1] + w)
 
         total_width = sum(col_widths)
-        row_height = 30
+        default_row_height = 30
         y = 20
 
-        # === رأس الجدول: معلومات Route
         canvas.create_text(10, y, anchor="nw", text=f"🕗 بداية العمل: {start_hour}", font=("Segoe UI", 10, "bold"))
         canvas.create_text(total_width // 2, y, anchor="n", text=f"📅 التاريخ: {readable_date}", font=("Segoe UI", 10, "bold"))
         canvas.create_text(total_width - 10, y, anchor="ne", text=f"🚗 السائق: {driver}", font=("Segoe UI", 10, "bold"))
         y += 30
 
-        # === رؤوس الأعمدة
         for i, header in enumerate(headers):
             x = x_positions[i]
-            canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#dddddd")
-            canvas.create_text(x + col_widths[i] // 2, y + row_height // 2, anchor="center", text=header, font=("Segoe UI", 10, "bold"))
+            canvas.create_rectangle(x, y, x + col_widths[i], y + default_row_height, fill="#dddddd")
+            canvas.create_text(x + col_widths[i] // 2, y + default_row_height // 2, anchor="center", text=header, font=("Segoe UI", 10, "bold"))
 
-        y += row_height
+        y += default_row_height
         start_table_y = y
-
-        # ✅ قائمة لتخزين المتغيرات الخاصة بالملاحظات
         self._notes_vars = []
 
-        # === الصفوف
+        font_conf = ("Segoe UI", 9)
+        font_obj = tkfont.Font(font=font_conf)
+
         for row_index, row in enumerate(rows):
-            for i, value in enumerate(row):
+            row_data = list(row)
+            cell_heights = []
+
+            # حساب ارتفاع كل الأعمدة ما عدا "ملاحظات"
+            for i in range(len(headers) - 1):
+                text = str(row_data[i])
+                width_limit = col_widths[i] - 8
+                words = text.split()
+                lines = []
+                current_line = ""
+                for word in words:
+                    test_line = current_line + " " + word if current_line else word
+                    if font_obj.measure(test_line) <= width_limit:
+                        current_line = test_line
+                    else:
+                        lines.append(current_line)
+                        current_line = word
+                if current_line:
+                    lines.append(current_line)
+                line_height = font_obj.metrics("linespace")
+                total_height = len(lines) * line_height + 8
+                cell_heights.append(total_height)
+
+            # حساب ارتفاع عمود "ملاحظات"
+            notes_text = str(row_data[-1])
+            width_limit = col_widths[-1] - 8
+            words = notes_text.split()
+            lines = []
+            current_line = ""
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                if font_obj.measure(test_line) <= width_limit:
+                    current_line = test_line
+                else:
+                    lines.append(current_line)
+                    current_line = word
+            if current_line:
+                lines.append(current_line)
+            notes_height = len(lines) * font_obj.metrics("linespace") + 8
+            cell_heights.append(notes_height)
+
+            row_height = max(cell_heights)
+
+            for i in range(len(headers)):
                 x = x_positions[i]
                 canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff")
 
-                if i == len(row) - 1:  # ✅ عمود الملاحظات الأخير فقط
-                    var = tk.StringVar(value=value)
-                    entry = tb.Entry(canvas, textvariable=var, foreground="red", font=("Segoe UI", 9))
-                    canvas.create_window(x + 2, y + 2, anchor="nw", window=entry, width=col_widths[i] - 4, height=row_height - 4)
-                    self._notes_vars.append(var)
+                if i == len(headers) - 1:
+                    text_widget = tk.Text(canvas, font=font_conf, wrap="word", bd=0)
+                    text_widget.tag_configure("red", foreground="red")
+                    text_widget.insert("1.0", str(row_data[i]), "red")
+
+                    def on_modified(event, row_index=row_index):
+                        event.widget.edit_modified(False)
+                        self._update_notes_from_widgets()
+
+                    text_widget.bind("<<Modified>>", on_modified)
+                    text_widget.edit_modified(False)
+
+                    canvas.create_window(
+                        x + 2, y + 2,
+                        anchor="nw",
+                        window=text_widget,
+                        width=col_widths[i] - 4,
+                        height=row_height - 4
+                    )
+                    self._notes_vars.append(text_widget)
                 else:
-                    canvas.create_text(x + col_widths[i] // 2, y + row_height // 2, anchor="center", text=str(value), font=("Segoe UI", 9))
+                    canvas.create_text(
+                        x + 4, y + 4,
+                        anchor="nw",
+                        text=str(row_data[i]),
+                        font=font_conf,
+                        width=col_widths[i] - 8
+                    )
 
             y += row_height
 
-        # === خطوط فاصلة عمودية كاملة
         x = 0
         for width in col_widths:
-            canvas.create_line(x, start_table_y - row_height, x, y, fill="#000000")
+            canvas.create_line(x, start_table_y - default_row_height, x, y, fill="#000000")
             x += width
-        canvas.create_line(x, start_table_y - row_height, x, y, fill="#000000")
-
-        # === خط أفقي أسفل الجدول
+        canvas.create_line(x, start_table_y - default_row_height, x, y, fill="#000000")
         canvas.create_line(0, y, total_width, y, fill="#000000")
 
         def on_canvas_click(event):
-            x, y = event.x, event.y
-
+            ex, ey = event.x, event.y
+            cursor_y = start_table_y
             for row_index, row in enumerate(rows):
-                cell_y = start_table_y + row_index * row_height
-                if cell_y <= y <= cell_y + row_height:
-                    if x_positions[0] <= x <= x_positions[1]:  # عمود الطبيب فقط
-                        self._show_doctor_selector(row_index, x_positions[0], cell_y)
-                        return
+                row_data = list(row)
+                cell_heights = []
+                for i in range(len(headers)):
+                    text = str(row_data[i])
+                    width_limit = col_widths[i] - 8
+                    words = text.split()
+                    lines = []
+                    current_line = ""
+                    for word in words:
+                        test_line = current_line + " " + word if current_line else word
+                        if font_obj.measure(test_line) <= width_limit:
+                            current_line = test_line
+                        else:
+                            lines.append(current_line)
+                            current_line = word
+                    if current_line:
+                        lines.append(current_line)
+                    est_height = len(lines) * font_obj.metrics("linespace") + 8
+                    cell_heights.append(est_height)
+
+                row_height = max(cell_heights)
+
+                if cursor_y <= ey <= cursor_y + row_height:
+                    if x_positions[0] <= ex <= x_positions[1]:
+                        self._show_doctor_selector(row_index, x_positions[0], cursor_y)
+                    elif x_positions[1] <= ex <= x_positions[2]:
+                        self._show_time_selector(row_index, x_positions[1], cursor_y)
+                    elif x_positions[2] <= ex <= x_positions[3]:
+                        self._show_lab_selector(row_index, x_positions[2], cursor_y)
+                    elif x_positions[3] <= ex <= x_positions[4]:
+                        self._show_material_selector(row_index, x_positions[3], cursor_y)
+                    return
+                cursor_y += row_height
 
         canvas.bind("<Button-1>", on_canvas_click)
-
         canvas.config(scrollregion=(0, 0, total_width, y + 20))
 
     def _show_doctor_selector(self, row_index, x, y):
         import tkinter as tk
-        from tkinter import ttk
 
         canvas = self.route_preview_canvas
         current_date = self.route_days[self.current_route_index]
         day_key = current_date.strftime("%Y-%m-%d")
 
-        if hasattr(self, "_active_doctor_combo"):
-            self._active_doctor_combo.destroy()
+        # حذف أي قائمة سابقة
+        if hasattr(self, "_active_doctor_widget"):
+            canvas.delete(self._active_doctor_window_id)
+            del self._active_doctor_widget
+            del self._active_doctor_window_id
 
+        # جلب كل الأطباء والمخابر
         all_doctors = self.get_all_doctor_names()
         all_labs = self.get_all_lab_names()
-
         doctor_items = [f"🧑‍⚕️ {name}" for name in all_doctors]
         lab_items = [f"🧪 {lab}" for lab in all_labs]
-        all_items = doctor_items + lab_items
+        special_delete_option = "🗑️ حذف هذا السطر"
+        all_items = [special_delete_option] + doctor_items + lab_items
 
-        # حساب عرض العمود الأول
+        # حساب العرض
         canvas.update_idletasks()
         canvas_width = canvas.winfo_width() or 1000
         column_ratios = [1.4, 0.8, 0.8, 1.4, 2, 2.6]
@@ -2085,53 +2189,364 @@ class MedicalTransApp(tb.Window):
         col_widths = [int(canvas_width * (r / total_ratio)) for r in column_ratios]
         doctor_col_width = col_widths[0]
 
-        combo_var = tk.StringVar()
-        combo = ttk.Combobox(canvas, textvariable=combo_var, values=all_items, width=40, state="normal")
-        combo.set("")  # لتفعيل الكتابة من البداية
-        canvas.create_window(x + 2, y + 2, anchor="nw", window=combo, width=doctor_col_width - 4)
+        # الحاوية
+        container = tk.Frame(canvas)
+        widget_id = canvas.create_window(x + 2, y + 2, anchor="nw", window=container, width=doctor_col_width - 4)
+
+        entry_var = tk.StringVar()
+        entry = tk.Entry(container, textvariable=entry_var, font=("Segoe UI", 9))
+        entry.pack(fill="x")
+
+        listbox_frame = tk.Frame(container)
+        listbox = tk.Listbox(listbox_frame, height=8, font=("Segoe UI", 9))
+        scrollbar = tk.Scrollbar(listbox_frame, orient="vertical", command=listbox.yview)
+        listbox.config(yscrollcommand=scrollbar.set)
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        listbox_frame.pack(fill="both", expand=True)
+
+        def update_listbox(*_):
+            typed = entry_var.get().lower()
+            listbox.delete(0, "end")
+            for item in all_items:
+                if typed in item.lower():
+                    listbox.insert("end", item)
+
+        entry_var.trace_add("write", update_listbox)
+        update_listbox()
+
+        # إغلاق عند النقر خارجًا
+        def close_on_click_outside(event):
+            if hasattr(self, "_active_doctor_widget") and hasattr(self, "_active_doctor_window_id"):
+                x_click, y_click = event.x, event.y
+                bbox = canvas.bbox(self._active_doctor_window_id)
+                if bbox:
+                    x1, y1, x2, y2 = bbox
+                    if x1 <= x_click <= x2 and y1 <= y_click <= y2:
+                        return  # النقر داخل النافذة
+                canvas.delete(self._active_doctor_window_id)
+                del self._active_doctor_widget
+                del self._active_doctor_window_id
+                self._draw_route_preview()
+
+        canvas.bind("<Button-1>", close_on_click_outside, add="+")
 
         def on_select(event=None):
-            selected = combo.get().strip()
-            if not selected or selected not in all_items:
+            selected = listbox.get("anchor").strip()
+            if not selected:
+                return
+            elif selected == special_delete_option:
                 del self.route_temp_data[day_key][row_index]
-            else:
-                if selected.startswith("🧑‍⚕️ "):
-                    name = selected.replace("🧑‍⚕️ ", "")
-                    doctor = self.get_doctor_by_name(name)
-                    if doctor:
-                        row = (
-                            doctor["name"],
-                            doctor["time"],
-                            "",
-                            doctor["desc"],
-                            doctor["address"],
-                            ""
-                        )
-                        self.route_temp_data[day_key][row_index] = row
-                elif selected.startswith("🧪 "):
-                    lab_name = selected.replace("🧪 ", "")
-                    address = self.get_lab_address_by_name(lab_name)
-                    row = (lab_name, "", "", "", address, "")
+            elif selected.startswith("🧑‍⚕️ "):
+                name = selected.replace("🧑‍⚕️ ", "")
+                doctor = self.get_doctor_by_name(name)
+                if doctor:
+                    row = (
+                        doctor["name"],         # الطبيب / المخبر
+                        doctor["time"],         # الوقت
+                        doctor["lab"],          # المخبر
+                        "",                     # ✅ نترك "Beschreibung" فارغًا ← المستخدم يختار المواد لاحقًا
+                        doctor["address"],      # العنوان
+                        ""                      # ✅ ملاحظات/مواد فارغة
+                    )
                     self.route_temp_data[day_key][row_index] = row
+            elif selected.startswith("🧪 "):
+                lab_name = selected.replace("🧪 ", "")
+                address = self.get_lab_address_by_name(lab_name)
+                row = (lab_name, "", "", "", address, "")
+                self.route_temp_data[day_key][row_index] = row
 
-            combo.destroy()
+            canvas.delete(self._active_doctor_window_id)
+            del self._active_doctor_widget
+            del self._active_doctor_window_id
             self._draw_route_preview()
 
-        def filter_items(event):
-            typed = combo.get().lower()
-            matches = [item for item in all_items if typed in item.lower()]
-            combo["values"] = matches if matches else all_items
-            combo.event_generate("<Down>")  # يعيد فتح القائمة بعد الفلترة
+        listbox.bind("<Return>", on_select)
+        listbox.bind("<Double-Button-1>", on_select)
+        entry.bind("<Down>", lambda e: listbox.focus_set())
+        entry.focus_set()
 
-        combo.bind("<<ComboboxSelected>>", on_select)
-        combo.bind("<Return>", on_select)
-        combo.bind("<FocusOut>", lambda e: combo.destroy())
-        combo.bind("<KeyRelease>", filter_items)
+        self._active_doctor_widget = container
+        self._active_doctor_window_id = widget_id
 
-        combo.focus_set()
-        combo.after(100, lambda: combo.event_generate('<Down>'))  # ✅ فتح تلقائي
+    def _show_time_selector(self, row_index, x, y):
+        import tkinter as tk
+        from tkinter import messagebox
 
-        self._active_doctor_combo = combo
+        canvas = self.route_preview_canvas
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+
+        if hasattr(self, "_active_time_selector"):
+            canvas.delete(self._active_time_window_id)
+            del self._active_time_selector
+            del self._active_time_window_id
+
+        options = ["bis", "von - bis", "ab", "nach Anruf", "Anschl."]
+        time_values = self.get_all_doctor_times()
+
+        canvas.update_idletasks()
+        canvas_width = canvas.winfo_width() or 1000
+        column_ratios = [1.4, 1.2, 0.8, 1.4, 2, 2.6]
+        total_ratio = sum(column_ratios)
+        col_widths = [int(canvas_width * (r / total_ratio)) for r in column_ratios]
+        time_col_width = col_widths[1]
+
+        frame = tk.Frame(canvas, bd=1, relief="solid", bg="white")
+        window_id = canvas.create_window(x + 2, y + 2, anchor="nw", window=frame, width=time_col_width - 4)
+        self._active_time_selector = frame
+        self._active_time_window_id = window_id
+
+        selected_option = tk.StringVar(value=options[0])
+        selected_time_from = tk.StringVar(value=time_values[0] if time_values else "")
+        selected_time_to = tk.StringVar(value=time_values[1] if len(time_values) > 1 else "")
+
+        # عناصر الإدخال في إطار علوي
+        input_frame = tk.Frame(frame, bg="white")
+        input_frame.pack(fill="both", expand=True)
+
+        type_menu = tk.OptionMenu(input_frame, selected_option, *options)
+        type_menu.config(font=("Segoe UI", 9), bg="white", activebackground="white", fg="black", activeforeground="black")
+        type_menu.pack(fill="x")
+
+        time_menu_from = tk.OptionMenu(input_frame, selected_time_from, selected_time_from.get(), *time_values)
+        time_menu_from.config(font=("Segoe UI", 9), bg="white", activebackground="white", fg="black", activeforeground="black")
+
+        time_menu_to = tk.OptionMenu(input_frame, selected_time_to, selected_time_to.get(), *time_values)
+        time_menu_to.config(font=("Segoe UI", 9), bg="white", activebackground="white", fg="black", activeforeground="black")
+
+        def update_ui(*_):
+            for widget in (time_menu_from, time_menu_to):
+                widget.pack_forget()
+            if selected_option.get() == "von - bis":
+                time_menu_from.pack(fill="x")
+                time_menu_to.pack(fill="x")
+            elif selected_option.get() in ("bis", "ab"):
+                time_menu_from.pack(fill="x")
+
+        selected_option.trace_add("write", update_ui)
+        update_ui()
+
+        # زر تأكيد في الأسفل
+        button_frame = tk.Frame(frame, bg="white")
+        button_frame.pack(fill="x", pady=4)
+
+        def apply_time():
+            prefix = selected_option.get()
+
+            # استخدام النافذة العليا بشكل مضمون
+            parent_window = canvas.winfo_toplevel()
+
+            if prefix == "von - bis":
+                t1 = selected_time_from.get()
+                t2 = selected_time_to.get()
+                try:
+                    h1, m1 = map(int, t1.split(":"))
+                    h2, m2 = map(int, t2.split(":"))
+                    if (h2, m2) <= (h1, m1):
+                        self.route_preview_canvas.update_idletasks()  # لتأكيد تحديث السياق
+                        messagebox.showerror(
+                            "خطأ في الوقت",
+                            "يجب أن يكون bis بعد von.",
+                            parent=parent_window
+                        )
+                        return
+                except:
+                    messagebox.showerror(
+                        "خطأ في التنسيق",
+                        "صيغة الوقت غير صحيحة.",
+                        parent=parent_window
+                    )
+                    return
+
+                suffix = f"{t1} - {t2}"
+            elif prefix == "nach Anruf":
+                doctor_name = self.route_temp_data[day_key][row_index][0].strip()
+                doctor = self.get_doctor_by_name(doctor_name) if doctor_name else {}
+                phone = doctor.get("phone", "").strip()
+                suffix = f"nach Anruf 📞 {phone}" if phone else "nach Anruf"
+            elif prefix in ("bis", "ab"):
+                suffix = selected_time_from.get()
+            else:        
+                suffix = ""
+
+            value = f"{prefix} {suffix}".strip()
+            current_row = list(self.route_temp_data[day_key][row_index])
+            current_row[1] = value
+            self.route_temp_data[day_key][row_index] = tuple(current_row)
+            canvas.delete(window_id)
+            del self._active_time_selector
+            del self._active_time_window_id
+            self._draw_route_preview()
+
+        btn = tk.Button(button_frame, text="✔️ تم", command=apply_time, bg="white")
+        btn.pack()
+
+        def close_if_click_outside(event):
+            if hasattr(self, "_active_time_window_id"):
+                bbox = canvas.bbox(self._active_time_window_id)
+                if bbox:
+                    x1, y1, x2, y2 = bbox
+                    if not (x1 <= event.x <= x2 and y1 <= event.y <= y2):
+                        canvas.delete(self._active_time_window_id)
+                        del self._active_time_selector
+                        del self._active_time_window_id
+                        self._draw_route_preview()
+
+        canvas.bind("<Button-1>", close_if_click_outside, add="+")
+
+    def _show_lab_selector(self, row_index, x, y):
+        import tkinter as tk
+
+        canvas = self.route_preview_canvas
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+
+        # حذف أي قائمة سابقة
+        if hasattr(self, "_active_lab_selector"):
+            canvas.delete(self._active_lab_window_id)
+            del self._active_lab_selector
+            del self._active_lab_window_id
+
+        # جلب المخابر من التبويب
+        lab_items = self.get_all_lab_names()
+
+        # حساب عرض العمود الثالث (المخبر)
+        canvas.update_idletasks()
+        canvas_width = canvas.winfo_width() or 1000
+        column_ratios = [1.4, 0.8, 0.8, 1.4, 2, 2.6]
+        total_ratio = sum(column_ratios)
+        col_widths = [int(canvas_width * (r / total_ratio)) for r in column_ratios]
+        lab_col_width = col_widths[2]
+
+        # الحاوية
+        frame = tk.Frame(canvas, bd=1, relief="solid", bg="white")
+        window_id = canvas.create_window(x + 2, y + 2, anchor="nw", window=frame, width=lab_col_width - 4)
+
+        # حقل إدخال
+        entry_var = tk.StringVar()
+        entry = tk.Entry(frame, textvariable=entry_var, font=("Segoe UI", 9))
+        entry.pack(fill="x", padx=2, pady=(2, 0))
+        entry.focus_set()
+
+        # Listbox مع Scrollbar
+        listbox_frame = tk.Frame(frame)
+        listbox_frame.pack(fill="both", expand=True, padx=2, pady=(0, 2))
+
+        listbox = tk.Listbox(listbox_frame, height=8, font=("Segoe UI", 9))
+        scrollbar = tk.Scrollbar(listbox_frame, orient="vertical", command=listbox.yview)
+        listbox.config(yscrollcommand=scrollbar.set)
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # فلترة القائمة
+        def update_listbox(*_):
+            typed = entry_var.get().strip().lower()
+            listbox.delete(0, "end")
+            for item in lab_items:
+                if typed in item.lower():
+                    listbox.insert("end", item)
+
+        entry_var.trace_add("write", update_listbox)
+        update_listbox()
+
+        # عند الاختيار
+        def on_select(event=None):
+            if not listbox.curselection():
+                return
+            selected_lab = listbox.get(listbox.curselection())
+            current_row = list(self.route_temp_data[day_key][row_index])
+            current_row[2] = selected_lab  # العمود الثالث = المخبر
+            self.route_temp_data[day_key][row_index] = tuple(current_row)
+            canvas.delete(window_id)
+            del self._active_lab_selector
+            del self._active_lab_window_id
+            self._draw_route_preview()
+
+        listbox.bind("<Double-Button-1>", on_select)
+        listbox.bind("<Return>", on_select)
+
+        # إغلاق عند النقر خارجًا
+        def close_if_click_outside(event):
+            if hasattr(self, "_active_lab_window_id"):
+                bbox = canvas.bbox(self._active_lab_window_id)
+                if bbox:
+                    x1, y1, x2, y2 = bbox
+                    if not (x1 <= event.x <= x2 and y1 <= event.y <= y2):
+                        canvas.delete(self._active_lab_window_id)
+                        del self._active_lab_selector
+                        del self._active_lab_window_id
+                        self._draw_route_preview()
+
+        canvas.bind("<Button-1>", close_if_click_outside, add="+")
+
+        self._active_lab_selector = frame
+        self._active_lab_window_id = window_id
+
+    def _show_material_selector(self, row_index, x, y):
+        import tkinter as tk
+
+        canvas = self.route_preview_canvas
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+
+        # حذف أي نافذة سابقة
+        if hasattr(self, "_active_material_selector"):
+            canvas.delete(self._active_material_window_id)
+            del self._active_material_selector
+            del self._active_material_window_id
+
+        # ✅ المواد المتاحة دائمًا
+        material_options = [
+            "BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer", "Kiste"
+        ]
+
+        # اسم الطبيب
+        doctor_name = self.route_temp_data[day_key][row_index][0].strip()
+        doctor = self.get_doctor_by_name(doctor_name) if doctor_name else {}
+
+        # ✅ المواد المحددة مسبقًا
+        selected = doctor.get("materials", "").split(",") if doctor else []
+        selected = [m.strip() for m in selected if m.strip()]
+
+        # الحاوية
+        frame = tk.Frame(canvas, bd=1, relief="solid", bg="white")
+        window_id = canvas.create_window(x + 2, y + 2, anchor="nw", window=frame)
+        self._active_material_selector = frame
+        self._active_material_window_id = window_id
+
+        vars = []
+        for item in material_options:
+            var = tk.BooleanVar(value=item in selected)
+            chk = tk.Checkbutton(frame, text=item, variable=var, font=("Segoe UI", 9), bg="white")
+            chk.pack(anchor="w")
+            vars.append((item, var))
+
+        def apply_selection():
+            selected_items = [item for item, var in vars if var.get()]
+            current_row = list(self.route_temp_data[day_key][row_index])
+            current_row[3] = ", ".join(selected_items)
+            self.route_temp_data[day_key][row_index] = tuple(current_row)
+            canvas.delete(window_id)
+            del self._active_material_selector
+            del self._active_material_window_id
+            self._draw_route_preview()
+
+        btn = tk.Button(frame, text="✔️ تم", command=apply_selection, bg="white")
+        btn.pack(pady=4)
+
+        def close_if_click_outside(event):
+            if hasattr(self, "_active_material_window_id"):
+                bbox = canvas.bbox(self._active_material_window_id)
+                if bbox:
+                    x1, y1, x2, y2 = bbox
+                    if not (x1 <= event.x <= x2 and y1 <= event.y <= y2):
+                        canvas.delete(self._active_material_window_id)
+                        del self._active_material_selector
+                        del self._active_material_window_id
+                        self._draw_route_preview()
+
+        canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
     def get_all_doctor_names(self):
         import sqlite3
@@ -2146,27 +2561,61 @@ class MedicalTransApp(tb.Window):
 
     def get_doctor_by_name(self, name):
         import sqlite3
+        import json
         try:
             with sqlite3.connect("medicaltrans.db") as conn:
                 c = conn.cursor()
                 c.execute("""
-                    SELECT name, weekday_times, visit_type, labs, materials, street, city, zip_code
+                    SELECT name, weekday_times, visit_type, labs, materials,
+                           street, city, zip_code, phone
                     FROM doctors WHERE name = ?
                 """, (name,))
                 row = c.fetchone()
                 if row:
                     full_address = f"{row[7]} {row[6]}, {row[5]}"
+                    materials_text = row[4]
+                    if materials_text and materials_text.strip().startswith("["):
+                        try:
+                            materials_list = json.loads(materials_text)
+                            materials_text = ", ".join(materials_list)
+                        except:
+                            pass
                     return {
                         "name": row[0],
                         "time": row[1],
                         "desc": row[2],
                         "lab": row[3],
-                        "notes": row[4],
-                        "address": full_address
+                        "materials": materials_text,
+                        "notes": "",
+                        "address": full_address,
+                        "phone": row[8] or ""
                     }
         except Exception as e:
             self.show_message("error", f"فشل جلب بيانات الطبيب '{name}': {e}")
             return None
+
+    def get_all_doctor_times(self):
+        times = []
+        for hour in range(7, 18):  # من 7 إلى 17 (يشمل)
+            times.append(f"{hour:02d}:00")
+            times.append(f"{hour:02d}:30")
+        return times
+
+    def _update_notes_from_widgets(self):
+        """تحديث آخر عمود (الملاحظات/المواد) من مربعات النص إلى self.route_temp_data"""
+        day = self.route_days[self.current_route_index]
+        day_key = day.strftime("%Y-%m-%d")
+
+        if day_key not in self.route_temp_data:
+            return
+
+        rows = self.route_temp_data[day_key]
+        for row_index, text_widget in enumerate(self._notes_vars):
+            if row_index < len(rows):
+                notes_text = text_widget.get("1.0", "end-1c").strip()
+                current_row = list(rows[row_index])          # ✅ التحويل إلى list
+                current_row[-1] = notes_text                 # ✅ تحديث عمود الملاحظات
+                rows[row_index] = current_row                # ✅ إعادة الحفظ بعد التعديل
 
     def _save_full_route(self):
         import sqlite3
@@ -2179,6 +2628,7 @@ class MedicalTransApp(tb.Window):
             return
 
         editing_mode = hasattr(self, "_editing_route_id") and self._editing_route_id is not None
+        self._update_notes_from_widgets()  # ✅ تحديث الملاحظات قبل الحفظ
 
         try:
             with sqlite3.connect("medicaltrans.db") as conn:
@@ -2213,6 +2663,16 @@ class MedicalTransApp(tb.Window):
                     # إدخال في جدول route_tasks
                     for row in rows:
                         doctor, time, lab, desc, address, notes = row
+                        if isinstance(notes, list):
+                            notes = ", ".join(notes)
+                        elif isinstance(notes, str) and notes.startswith("[") and notes.endswith("]"):
+                            try:
+                                import json
+                                notes_list = json.loads(notes)
+                                if isinstance(notes_list, list):
+                                    notes = ", ".join(str(item) for item in notes_list)
+                            except:
+                                pass  # إذا فشل التحويل نتركها كما هي
                         c.execute("""
                             INSERT INTO route_tasks (route_name, date, driver, name, time, lab, description, address, notes)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2248,6 +2708,7 @@ class MedicalTransApp(tb.Window):
         )
         if not file_path:
             return
+        self._update_notes_from_widgets()  # ✅ تحديث الملاحظات قبل الطباعة
 
         try:
             c = canvas.Canvas(file_path, pagesize=landscape(A4))
@@ -2264,7 +2725,7 @@ class MedicalTransApp(tb.Window):
                 c.drawString(30, height - 40, f"📅 {day.strftime('%A %d/%m/%Y')}   🚗 السائق: {self._route_inputs['driver_combo'].get().strip()}   📛 Route: {self._route_inputs['name_entry'].get().strip()}")
 
                 # رؤوس الأعمدة
-                headers = ["الطبيب / المخبر", "الوقت", "المخبر", "Beschreibung", "العنوان", "الملاحظات / المواد"]
+                headers = ["الطبيب / المخبر", "Zeit", "المخبر", "Beschreibung", "العنوان", "الملاحظات / المواد"]
                 col_widths = [110, 70, 80, 130, 190, 220]
                 x_positions = [30]
                 for w in col_widths[:-1]:
@@ -2278,11 +2739,37 @@ class MedicalTransApp(tb.Window):
 
                 # محتوى الجدول
                 c.setFont("Helvetica", 9)
+                line_height = 12  # ارتفاع السطر
+
                 for row in rows:
+                    max_cell_height = 0
+                    cell_lines_per_col = []
+
                     for i, text in enumerate(row):
-                        c.drawString(x_positions[i], y, str(text))
-                    y -= 18
-                    if y < 40:
+                        text = str(text)
+                        col_width = col_widths[i]
+                        x = x_positions[i]
+
+                        # التفاف يدوي للنص داخل الخلية
+                        words = text.split()
+                        lines = []
+                        current_line = ""
+
+                        for word in words:
+                            test_line = current_line + " " + word if current_line else word
+                            if c.stringWidth(test_line, "Helvetica", 9) <= col_width:
+                                current_line = test_line
+                            else:
+                                lines.append(current_line)
+                                current_line = word
+                        if current_line:
+                            lines.append(current_line)
+
+                        cell_lines_per_col.append(lines)
+                        max_cell_height = max(max_cell_height, len(lines) * line_height)
+
+                    # تحقق من وجود مساحة كافية في الصفحة
+                    if y - max_cell_height < 40:
                         c.showPage()
                         c.setFont("Helvetica-Bold", 10)
                         y = height - 50
@@ -2290,6 +2777,19 @@ class MedicalTransApp(tb.Window):
                             c.drawString(x_positions[i], y, header)
                         y -= 20
                         c.setFont("Helvetica", 9)
+
+                    # رسم كل خلية بالنص وحدودها
+                    for i, lines in enumerate(cell_lines_per_col):
+                        x = x_positions[i]
+                        col_width = col_widths[i]
+    
+                        for j, line in enumerate(lines):
+                            c.drawString(x + 2, y - j * line_height, line)
+
+                        # مستطيل الحدود حول الخلية
+                        c.rect(x - 1, y - max_cell_height, col_width, max_cell_height)
+
+                    y -= max_cell_height + 4  # المسافة بين الصفوف
 
                 c.showPage()
 
@@ -2399,7 +2899,7 @@ class MedicalTransApp(tb.Window):
         row_height = 30
         col_widths = [100, 70, 130, 100, 120, 130]
 
-        headers = ["اسم الطبيب", "الوقت", "Beschreibung", "المخبر", "العنوان", "المواد / ملاحظات"]
+        headers = ["اسم الطبيب", "Zeit", "Beschreibung", "المخبر", "العنوان", "المواد / ملاحظات"]
 
         # ==== رأس الصفحة ====
         canvas.create_text(50, 30, text=f"🚗 السائق: {self.main_preview_driver}", anchor="w", font=("Arial", 10, "bold"))
@@ -2755,7 +3255,7 @@ class MedicalTransApp(tb.Window):
 
         values = [e.get().strip() if hasattr(e, 'get') else e.get() for e in self.main_entries]
         if not all(values[:5]):
-            self.show_message("warning", "يرجى ملء الحقول الأساسية (الطبيب، المخبر، السائق، التاريخ، الوقت)")
+            self.show_message("warning", "يرجى ملء الحقول الأساسية (الطبيب، المخبر، السائق، التاريخ، Zeit)")
             return
 
         doctor, lab, driver, date_str, time, materials, address = values
@@ -3188,7 +3688,7 @@ class MedicalTransApp(tb.Window):
         # === الوقت حسب أيام الأسبوع في العمود الأوسط ===
         label_frame = tb.Frame(weekday_col)
         label_frame.pack(anchor="w", pady=(0, 5))
-        ttk.Label(label_frame, text="🗕 الوقت:").pack(side="left")
+        ttk.Label(label_frame, text="🗕 Zeit:").pack(side="left")
         ttk.Label(label_frame, text="*", foreground="red").pack(side="left")
 
         self.doctor_weekday_vars = {}
@@ -3196,7 +3696,7 @@ class MedicalTransApp(tb.Window):
             "mon": "الإثنين", "tue": "الثلاثاء", "wed": "الأربعاء",
             "thu": "الخميس", "fri": "الجمعة"
         }
-        time_options = ["حتى الساعة", "من - إلى", "بعد الساعة", "عند الاتصال", "بدون موعد"]
+        time_options = ["bis", "von - bis", "ab", "nach Anruf", "Anschl."]
         half_hour_slots = [f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30)]
 
         for key, label in weekday_labels.items():
@@ -3215,8 +3715,8 @@ class MedicalTransApp(tb.Window):
             def update_state(*args, d=day_var, t=type_var, fc=from_cb, tc=to_cb, cb=type_cb, fv=from_var, tv=to_var):
                 is_active = d.get()
                 cb.config(state="readonly" if is_active else "disabled")
-                fc.config(state="normal" if is_active and t.get() in ["من - إلى", "حتى الساعة", "بعد الساعة"] else "disabled")
-                tc.config(state="normal" if is_active and t.get() == "من - إلى" else "disabled")
+                fc.config(state="normal" if is_active and t.get() in ["von - bis", "bis", "ab"] else "disabled")
+                tc.config(state="normal" if is_active and t.get() == "von - bis" else "disabled")
                 if not is_active:
                     t.set("")
                     fv.set("")
@@ -3242,11 +3742,11 @@ class MedicalTransApp(tb.Window):
         material_field_frame.grid_columnconfigure(0, minsize=130)
         label_frame = tb.Frame(material_field_frame)
         label_frame.grid(row=0, column=0, sticky="w")
-        ttk.Label(label_frame, text="📦 المواد:").pack(side="left")
+        ttk.Label(label_frame, text="📦 Beschreibung:").pack(side="left")
         ttk.Label(label_frame, text="*", foreground="red").pack(side="left")
         material_frame = tb.Frame(material_field_frame)
         material_frame.grid(row=1, column=0, sticky="w")
-        material_options = ["BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer"]
+        material_options = ["BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer", "Kiste"]
         self.material_vars = {}
         for i, mat in enumerate(material_options):
             var = tk.BooleanVar()
@@ -3259,7 +3759,7 @@ class MedicalTransApp(tb.Window):
         lab_field_frame.grid_columnconfigure(0, minsize=130)
         label_frame = tb.Frame(lab_field_frame)
         label_frame.grid(row=0, column=0, sticky="w")
-        ttk.Label(label_frame, text="🧪 المخابر المرتبطة:").pack(side="left")
+        ttk.Label(label_frame, text="🧪 Labore:").pack(side="left")
         ttk.Label(label_frame, text="*", foreground="red").pack(side="left")
         lab_frame = tb.Frame(lab_field_frame)
         lab_frame.grid(row=1, column=0, sticky="w")
@@ -3280,7 +3780,7 @@ class MedicalTransApp(tb.Window):
 
         price_field_frame = tb.Frame(right_col)
         price_field_frame.grid(row=right_row, column=0, sticky="w", pady=5)
-        ttk.Label(price_field_frame, text="💶 السعر لكل نقلة (€):").pack(anchor="w")
+        ttk.Label(price_field_frame, text="💶 Honorare (€):").pack(anchor="w")
         price_entry = tb.Entry(price_field_frame, width=25)
         price_entry.pack(anchor="w")
         self.doctor_entries["price_per_trip"] = price_entry
@@ -3299,7 +3799,7 @@ class MedicalTransApp(tb.Window):
         table_frame.pack(fill="both", expand=True)
 
         columns = ("id", "name", "street", "city", "phone", "materials", "labs", "price_per_trip", "weekdays", "weekday_times")
-        labels = ("", "👨‍⚕️ اسم الطبيب", "🏠 الشارع", "🌍 المدينة", "📞 الهاتف", "📦 المواد", "🧪 المخابر", "💶 Honorare (€)", "🗓 الأيام", "⏰ الوقت")
+        labels = ("", "👨‍⚕️ اسم الطبيب", "🏠 الشارع", "🌍 المدينة", "📞 الهاتف", "Beschreibung 📦", "🧪 Labor:", "💶 Honorare (€)", "🗓 الأيام", "⏰ Zeit")
 
         tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=14)
         tree.pack(side="left", fill="both", expand=True)
@@ -3356,7 +3856,7 @@ class MedicalTransApp(tb.Window):
         type_var.set("")
 
         type_cb = ttk.Combobox(frame, values=[
-            "حتى الساعة", "من - إلى", "بعد الساعة", "عند الاتصال", "بدون موعد"
+            "bis", "von - bis", "ab", "nach Anruf", "Anschl."
         ], textvariable=type_var, state="readonly", width=15)
         type_cb.grid(row=0, column=1, sticky="w", padx=(0, 5))
 
@@ -3376,17 +3876,17 @@ class MedicalTransApp(tb.Window):
                 from_cb.configure(state="disabled")
                 to_cb.configure(state="disabled")
                 return
-            if t == "من - إلى":
+            if t == "von - bis":
                 from_cb.configure(state="readonly")
                 to_cb.configure(state="readonly")
-            elif t in ["حتى الساعة", "بعد الساعة"]:
+            elif t in ["bis", "ab"]:
                 from_cb.configure(state="readonly")
                 to_cb.configure(state="disabled")
             else:
                 from_cb.configure(state="disabled")
                 to_cb.configure(state="disabled")
 
-            if t == "عند الاتصال" and phone_entry and not phone_entry.get().strip():
+            if t == "nach Anruf" and phone_entry and not phone_entry.get().strip():
                 phone_entry.focus_set()
 
         def toggle_time_fields(*_):
@@ -3405,17 +3905,17 @@ class MedicalTransApp(tb.Window):
 
     def update_time_fields(self, type_var, from_cb, to_cb, phone_entry=None):
         t = type_var.get()
-        if t == "من - إلى":
+        if t == "von - bis":
             from_cb.configure(state="readonly")
             to_cb.configure(state="readonly")
-        elif t in ["حتى الساعة", "بعد الساعة"]:
+        elif t in ["bis", "ab"]:
             from_cb.configure(state="readonly")
             to_cb.configure(state="disabled")
         else:
             from_cb.configure(state="disabled")
             to_cb.configure(state="disabled")
 
-        if t == "عند الاتصال" and phone_entry and not phone_entry.get().strip():
+        if t == "nach Anruf" and phone_entry and not phone_entry.get().strip():
             phone_entry.focus_set()
 
     def _edit_doctor(self):
@@ -3470,7 +3970,7 @@ class MedicalTransApp(tb.Window):
         if not street or not city or not zip_code:
             missing_fields.append("العنوان الكامل")
         if not any(var[0].get() for var in self.doctor_weekday_vars.values()):
-            missing_fields.append("الوقت")
+            missing_fields.append("Zeit")
         if not any(var.get() for var in self.material_vars.values()):
             missing_fields.append("المواد")
         if not any(var.get() for var in self.lab_vars.values()):
@@ -3519,7 +4019,7 @@ class MedicalTransApp(tb.Window):
                 return
 
             # تحقق دقيق حسب النوع المحدد
-            if typ == "من - إلى":
+            if typ == "von - bis":
                 if not f or not t:
                     self.show_message("warning", f"❗ يرجى تحديد الوقت من وإلى ليوم {label}.")
                     return
@@ -3527,12 +4027,12 @@ class MedicalTransApp(tb.Window):
                     self.show_message("warning", f"❗ الوقت 'إلى' يجب أن يكون بعد 'من' في يوم {label}.")
                     return
                 selected_times.append(f"{typ} {f} - {t}")
-            elif typ in ["حتى الساعة", "بعد الساعة"]:
+            elif typ in ["bis", "ab"]:
                 if not f:
                     self.show_message("warning", f"❗ يرجى تحديد الساعة ليوم {label}.")
                     return
                 selected_times.append(f"{typ} {f}")
-            elif typ == "عند الاتصال":
+            elif typ == "nach Anruf":
                 if not phone:
                     self.show_message("warning", f"❗ يرجى إدخال رقم الهاتف ليوم {label}.")
                     return
@@ -3554,11 +4054,11 @@ class MedicalTransApp(tb.Window):
 
             if not typ:
                 weekday_updates.append(None)
-            elif typ == "من - إلى" and f and t:
+            elif typ == "von - bis" and f and t:
                 weekday_updates.append(f"{typ} {f} - {t}")
-            elif typ in ["حتى الساعة", "بعد الساعة"] and f:
+            elif typ in ["bis", "ab"] and f:
                 weekday_updates.append(f"{typ} {f}")
-            elif typ == "عند الاتصال":
+            elif typ == "nach Anruf":
                 weekday_updates.append(f"{typ} ({phone})")
             else:
                 weekday_updates.append(typ)
@@ -3761,9 +4261,9 @@ class MedicalTransApp(tb.Window):
         entries["zip_code"] = add_entry_block(left_col, "🏷 Zip Code:", zip_code)
         entries["phone"] = add_entry_block(left_col, "📞 رقم الهاتف:", phone)
 
-        tb.Label(center_col, text="📅 الوقت:").pack(anchor="w", pady=(0, 5))
+        tb.Label(center_col, text="📅 Zeit:").pack(anchor="w", pady=(0, 5))
         self.edit_doctor_weekday_vars = {}
-        time_options = ["حتى الساعة", "من - إلى", "بعد الساعة", "عند الاتصال", "بدون موعد"]
+        time_options = ["bis", "von - bis", "ab", "nach Anruf", "Anschl."]
         half_hour_slots = [
             "06:00", "06:30", "07:00", "07:30", "08:00", "08:30",
             "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
@@ -3796,9 +4296,9 @@ class MedicalTransApp(tb.Window):
                 if opt and super_normalize(raw_value).startswith(super_normalize(opt)):
                     initial_type = opt
                     rest = raw_value[len(opt):].strip()
-                    if opt == "من - إلى" and " - " in rest:
+                    if opt == "von - bis" and " - " in rest:
                         from_time, to_time = map(str.strip, rest.split(" - ", 1))
-                    elif opt in ["حتى الساعة", "بعد الساعة"]:
+                    elif opt in ["bis", "ab"]:
                         from_time = rest
 
                 # إنشاء المتغيرات
@@ -3830,8 +4330,8 @@ class MedicalTransApp(tb.Window):
                 def update_state(*args, d=day_var, t=type_var, fc=from_cb, tc=to_cb, cb=type_cb, fv=from_var, tv=to_var):
                     is_active = d.get()
                     cb.config(state="readonly" if is_active else "disabled")
-                    fc.config(state="normal" if is_active and t.get() in ["من - إلى", "حتى الساعة", "بعد الساعة"] else "disabled")
-                    tc.config(state="normal" if is_active and t.get() == "من - إلى" else "disabled")
+                    fc.config(state="normal" if is_active and t.get() in ["von - bis", "bis", "ab"] else "disabled")
+                    tc.config(state="normal" if is_active and t.get() == "von - bis" else "disabled")
                     if not is_active:
                         t.set("")
                         fv.set("")
@@ -3848,10 +4348,10 @@ class MedicalTransApp(tb.Window):
                 # تفعيل الحقول بناءً على حالة البداية
                 update_state()
                 
-        tb.Label(right_col, text="📦 المواد:").pack(anchor="w")
+        tb.Label(right_col, text="📦 Beschreibung:").pack(anchor="w")
         material_frame = tb.Frame(right_col)
         material_frame.pack(anchor="w")
-        material_options = ["BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer"]
+        material_options = ["BOX", "BAK-Dose", "Schachtel", "Befunde", "Rote Box", "Ständer", "Kiste"]
         selected_materials = json.loads(materials_json or "[]")
         material_vars = {}
         for i, mat in enumerate(material_options):
@@ -3859,7 +4359,7 @@ class MedicalTransApp(tb.Window):
             ttk.Checkbutton(material_frame, text=mat, variable=var).grid(row=i // 3, column=i % 3, padx=5, pady=3, sticky="w")
             material_vars[mat] = var
 
-        tb.Label(right_col, text="🧪 المخابر المرتبطة:").pack(anchor="w", pady=(8, 0))
+        tb.Label(right_col, text="🧪 Labore:").pack(anchor="w", pady=(8, 0))
         lab_frame = tb.Frame(right_col)
         lab_frame.pack(anchor="w")
         try:
@@ -3904,17 +4404,17 @@ class MedicalTransApp(tb.Window):
                         self.show_message("warning", f"❗ يجب اختيار نوع الوقت ليوم {weekday_labels[key]}.")
                         return
 
-                    if typ.get() == "من - إلى":
+                    if typ.get() == "von - bis":
                         if from_val.get() and to_val.get():
                             weekday_updates.append(f"{typ.get()} {from_val.get()} - {to_val.get()}")
                         else:
                             weekday_updates.append(typ.get())  # قد ترغب بمنع هذا أيضًا
-                    elif typ.get() in ["حتى الساعة", "بعد الساعة"]:
+                    elif typ.get() in ["bis", "ab"]:
                         if from_val.get():
                             weekday_updates.append(f"{typ.get()} {from_val.get()}")
                         else:
                             weekday_updates.append(typ.get())  # قد ترغب أيضًا بتحذير هنا
-                    elif typ.get() == "عند الاتصال":
+                    elif typ.get() == "nach Anruf":
                         weekday_updates.append(f"{typ.get()} ({entries['phone'].get().strip()})")
                     else:
                         weekday_updates.append(typ.get())
@@ -3933,11 +4433,11 @@ class MedicalTransApp(tb.Window):
                     if active.get():
                         label = weekday_labels.get(key, key)
                         selected_days.append(label)
-                        if typ.get() == "من - إلى":
+                        if typ.get() == "von - bis":
                             selected_times.append(f"{typ.get()} {from_val.get()} - {to_val.get()}")
-                        elif typ.get() in ["حتى الساعة", "بعد الساعة"]:
+                        elif typ.get() in ["bis", "ab"]:
                             selected_times.append(f"{typ.get()} {from_val.get()}")
-                        elif typ.get() == "عند الاتصال":
+                        elif typ.get() == "nach Anruf":
                             selected_times.append(f"{typ.get()} ({entries['phone'].get().strip()})")
                         else:
                             selected_times.append(typ.get())
@@ -6148,20 +6648,38 @@ class MedicalTransApp(tb.Window):
                 # ✅ تحقق من الإجازة عبر calendar_events
                 target_date_str = target_date.strftime("%Y-%m-%d")
                 c.execute("""
-                    SELECT 1 FROM calendar_events
-                    WHERE date = ? AND name = ? AND event_type = 'إجازة'
+                    SELECT 1 FROM vacations
+                    WHERE ? BETWEEN start_date AND end_date
+                    AND person_type = 'طبيب'
+                    AND name = ?
                 """, (target_date_str, name))
                 if c.fetchone():
                     continue
 
                 full_address = f"{zip_code} {city}, {street}"
+                import json
+                materials_text = materials
+                if materials_text and materials_text.strip().startswith("["):
+                    try:
+                        materials_list = json.loads(materials_text)
+                        materials_text = ", ".join(materials_list)
+                    except:
+                        pass
+                labs_text = labs
+                if labs_text and labs_text.strip().startswith("["):
+                    try:
+                        labs_list = json.loads(labs_text)
+                        labs_text = ", ".join(labs_list)
+                    except:
+                        pass
                 results.append({
                     "name": name,
                     "time": time,
-                    "lab": labs,
+                    "lab": labs_text,
                     "desc": visit_type,
                     "address": full_address,
-                    "notes": materials
+                    "materials": materials_text,  # ✅ هذا هو العمود الصحيح الآن
+                    "notes": ""                   # ✅ اتركه فارغًا كما اتفقنا
                 })
 
             conn.close()
@@ -6172,8 +6690,15 @@ class MedicalTransApp(tb.Window):
             return []
 
     def get_all_lab_names(self):
-        labs = self.get_lab_transfers_by_weekday("mon", None)  # أي يوم – لا يؤثر لأن الدالة لا تستخدمه فعليًا
-        return [lab["name"] for lab in labs]
+        import sqlite3
+        try:
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute("SELECT name FROM labs")
+                return [row[0] for row in c.fetchall()]
+        except Exception as e:
+            self.show_message("error", f"فشل جلب أسماء المخابر: {e}")
+            return []
 
     def get_lab_transfers_by_weekday(self, weekday_key, target_date):
         import sqlite3
