@@ -1882,10 +1882,6 @@ class MedicalTransApp(tb.Window):
         self._route_save_btn.pack_forget()
         self._load_route_day()
 
-    def _is_note_row(self, row):
-        row = (list(row) + [""] * 6)[:6]
-        return all(not (cell or "").strip() for cell in row[:5]) and (row[5] or "").strip()
-
     def _add_manual_route_row(self):
         import tkinter as tk
         from tkinter import ttk
@@ -2074,6 +2070,10 @@ class MedicalTransApp(tb.Window):
         day = self.route_days[self.current_route_index]
         day_key = day.strftime("%Y-%m-%d")
         rows = self.route_temp_data.get(day_key, [])
+
+        # ✅ إصلاح البنية: تأكد أن كل صف يحتوي على 6 أعمدة على الأقل
+        for i, row in enumerate(rows):
+            rows[i] = (list(row) + [""] * 6)[:6]
 
         weekday_names = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
         weekday_name = weekday_names[day.weekday()]
@@ -2308,9 +2308,12 @@ class MedicalTransApp(tb.Window):
             if not new_note:
                 new_note = "__note_only__"
 
-            row = [""] * 6
-            row[5] = new_note
-            self.route_temp_data[day_key][row_index] = row
+            row = self.route_temp_data[day_key][row_index]
+            while len(row) < 6:
+                row.append("")
+            for i in range(5):
+                row[i] = ""
+            row[5] = new_note.strip() or "__note_only__"
 
             self._draw_route_preview()
             top.destroy()
