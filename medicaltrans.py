@@ -264,6 +264,21 @@ def setup_database():
         )
     """)
 
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS route_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        route_name TEXT,
+        date TEXT,
+        driver TEXT,
+        name TEXT,
+        time TEXT,
+        lab TEXT,
+        description TEXT,
+        address TEXT,
+        notes TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -725,7 +740,7 @@ class MedicalTransApp(tb.Window):
         win.wait_window()
         return result[0]
     
-    def show_message(self, kind: str, message: str, parent=None):
+    def show_message(self, kind: str, message: str, parent=None, confirm_callback=None):
         import tkinter as tk
 
         root = parent or self
@@ -744,7 +759,8 @@ class MedicalTransApp(tb.Window):
             "success": "✔️ تم",
             "warning": "⚠️ تنبيه",
             "error": "❌ خطأ",
-            "info": "ℹ️ معلومة"
+            "info": "ℹ️ معلومة",
+            "confirm": "❓ تأكيد"
         }
         title = title_map.get(kind, "ℹ️ معلومة")
         ttk.Label(container, text=title, font=("Segoe UI", 12, "bold"), anchor="center", justify="center").pack(pady=(0, 10), fill="x")
@@ -761,15 +777,30 @@ class MedicalTransApp(tb.Window):
             font=("Segoe UI", 10)
         ).pack(pady=(0, 15), fill="x")
 
-        # ===== زر الإغلاق =====
-        ttk.Button(container, text="موافق", style="Primary.TButton", command=win.destroy).pack(ipadx=10)
+        # ===== أزرار الرسالة =====
+        btn_frame = tb.Frame(container)
+        btn_frame.pack()
+
+        def close():
+            win.destroy()
+
+        def on_confirm():
+            win.destroy()
+            if callable(confirm_callback):
+                confirm_callback()
+
+        if kind == "confirm":
+            ttk.Button(btn_frame, text="نعم", style="Primary.TButton", command=on_confirm).pack(side="left", padx=10, ipadx=10)
+            ttk.Button(btn_frame, text="لا", command=close).pack(side="left", padx=10, ipadx=10)
+        else:
+            ttk.Button(btn_frame, text="موافق", style="Primary.TButton", command=close).pack(ipadx=10)
 
         # ===== إغلاق بـ Enter =====
-        win.bind("<Return>", lambda e: win.destroy())
+        win.bind("<Return>", lambda e: close())
 
         # ===== تحديث وموضعة في المنتصف =====
         win.update_idletasks()
-        w = max(win.winfo_width(), 400)  # ← العرض لا يقل عن 400
+        w = max(win.winfo_width(), 400)
         h = win.winfo_height()
         x = root.winfo_x() + (root.winfo_width() // 2) - (w // 2)
         y = root.winfo_y() + (root.winfo_height() // 2) - (h // 2)
@@ -1518,6 +1549,8 @@ class MedicalTransApp(tb.Window):
                 self.show_message("warning", "لا توجد أيام متاحة هذا الأسبوع (عطل فقط)")
                 return
             self.route_temp_data = {}
+            self.route_driver_names = {}
+            self.route_start_hours = {}
             self.current_route_index = 0
 
         win = self.build_centered_popup("➕ إضافة Route جديدة", 1120, 700)
@@ -1547,49 +1580,12 @@ class MedicalTransApp(tb.Window):
                                     state="readonly", width=10)
         start_hour_combo.grid(row=0, column=7, padx=5)
 
-        doctor_input_frame = tb.LabelFrame(win, text="👨‍⚕️ إضافة طبيب إلى Route", padding=10)
+        doctor_input_frame = tb.LabelFrame(win, text="🏥 إضافة مخبر إلى Route", padding=10)
         doctor_input_frame.pack(fill="x", padx=10, pady=(5, 10))
 
-        # === مكوّن البحث وقائمة الأطباء والمخابر ===
-        ttk.Label(doctor_input_frame, text="🧑‍⚕️ الطبيب / المخبر:").grid(row=0, column=0, sticky="nw", padx=5, pady=5)
-        doctor_combo = ttk.Combobox(doctor_input_frame, state="readonly", width=35)
-        doctor_combo.grid(row=0, column=2, padx=5, sticky="w")
-
-        # 🔍 حقل البحث
-        search_entry = tb.Entry(doctor_input_frame, width=35)
-        search_entry.grid(row=0, column=1, padx=5, sticky="w")
-
-        # ✅ إطار يحتوي على Canvas + Scrollbar يدوي
-        scroll_container = tb.Frame(doctor_input_frame)
-        scroll_container.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
-
-        # ✅ Canvas ثابت الارتفاع (يعرض ~10 عناصر بحد أقصى)
-        doctor_canvas = tk.Canvas(scroll_container, height=220, highlightthickness=0)
-        doctor_canvas.pack(side="left", fill="both", expand=True)
-
-        # ✅ Scrollbar أنيق مثل الجداول الأخرى
-        scrollbar = ttk.Scrollbar(scroll_container, orient="vertical", command=doctor_canvas.yview, style="TScrollbar")
-        scrollbar.pack(side="right", fill="y")
-
-        doctor_canvas.configure(yscrollcommand=scrollbar.set)
-
-        # ✅ الإطار الداخلي داخل الـ Canvas
-        self._doctor_lab_checks_frame = tb.Frame(doctor_canvas)
-        doctor_canvas.create_window((0, 0), window=self._doctor_lab_checks_frame, anchor="nw")
-
-        # ✅ تحديث التمرير عند تغيير الحجم
-        def update_scroll_region(event):
-            doctor_canvas.configure(scrollregion=doctor_canvas.bbox("all"))
-        self._doctor_lab_checks_frame.bind("<Configure>", update_scroll_region)
-
-        # قائمة التحقق تكون ديناميكية ← سنملأها في _load_route_day()
-        self._doctor_lab_vars = {}  # المفتاح = الاسم الكامل، القيمة = BooleanVar()
-
-        search_entry.bind("<KeyRelease>", lambda e: self._update_doctor_checkbuttons(search_entry.get()))
-
-        add_doctor_btn = ttk.Button(doctor_input_frame, text="➕ إضافة الطبيب إلى الجدول",
-                                     command=lambda: self._add_selected_doctor_to_table())
-        add_doctor_btn.grid(row=0, column=4, rowspan=3, padx=10)
+        self._doctor_lab_checks_frame = tb.Frame(doctor_input_frame)
+        self._doctor_lab_checks_frame.pack(fill="x", pady=(10, 5))
+        self._doctor_lab_vars = {}
 
         canvas_frame = tb.Frame(win)
         canvas_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -1607,8 +1603,18 @@ class MedicalTransApp(tb.Window):
 
         right_btns = tb.Frame(button_frame)
         right_btns.pack(side="right")
-        ttk.Button(right_btns, text="💾 حفظ Route", command=self._save_full_route).pack(side="left", padx=5)
-        ttk.Button(right_btns, text="🖨️ طباعة Route", command=self._print_route_pdf).pack(side="left", padx=5)
+        
+        # زر تطبيق
+        ttk.Button(right_btns, text="💾 تطبيق", command=lambda: self._save_full_route(apply_only=True)).pack(side="left", padx=5)
+
+        # زر حفظ
+        ttk.Button(right_btns, text="💾 حفظ", command=self._save_full_route).pack(side="left", padx=5)
+
+        # زر إغلاق
+        ttk.Button(right_btns, text="❌ إغلاق", command=self._confirm_close_route_popup).pack(side="left", padx=5)
+
+        # زر طباعة
+        ttk.Button(right_btns, text="🖨️ طباعة", command=self._print_route_pdf).pack(side="left", padx=5)
 
         self._route_inputs = {
             "window": win,
@@ -1616,23 +1622,55 @@ class MedicalTransApp(tb.Window):
             "name_entry": route_name_entry,
             "driver_combo": driver_combo,
             "date_label": route_date_label,
-            "start_hour_combo": start_hour_combo,
-            "doctor_combo": doctor_combo  # ✅ هذا السطر يحل المشكلة
+            "start_hour_combo": start_hour_combo
         }
 
-        if not getattr(self, "_suppress_autoload", False):
+        should_autoload = not getattr(self, "_suppress_autoload", False)
+        if should_autoload:
             self._load_route_day()
+
+        def update_driver_and_time(*_):
+            if self.route_days:
+                day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
+                self.route_driver_names[day_key] = driver_combo.get().strip()
+                self.route_start_hours[day_key] = start_hour_combo.get().strip()
+                self._draw_route_preview()
+
+        driver_combo.bind("<<ComboboxSelected>>", update_driver_and_time)
+        start_hour_combo.bind("<<ComboboxSelected>>", update_driver_and_time)
+        driver_combo.bind("<FocusOut>", update_driver_and_time)
+        start_hour_combo.bind("<FocusOut>", update_driver_and_time)
+        win.protocol("WM_DELETE_WINDOW", self._confirm_close_route_popup)
+
+    def _confirm_close_route_popup(self):
+        self.show_message(
+            "confirm",
+            "هل أنت متأكد أنك تريد الخروج بدون حفظ؟",
+            confirm_callback=lambda: self._route_popup.destroy()
+        )
 
     # 🧠 فلترة ذكية
     def _update_doctor_checkbuttons(self, search_text=""):
         for widget in self._doctor_lab_checks_frame.winfo_children():
             widget.destroy()
 
+        # إنشاء إطارين منفصلين للأطباء والمخابر
+        doctors_frame = tb.Frame(self._doctor_lab_checks_frame)
+        doctors_frame.pack(fill="x", anchor="w")
+    
+        labs_frame = tb.Frame(self._doctor_lab_checks_frame)
+        labs_frame.pack(fill="x", anchor="w", pady=(5, 0))  # سطر جديد للمخابر
+
         for label, var in self._doctor_lab_vars.items():
             if search_text.lower() in label.lower():
-                chk = ttk.Checkbutton(self._doctor_lab_checks_frame, text=label, variable=var,
+                if label.startswith("🧪"):  # المخابر
+                    parent = labs_frame
+                else:  # الأطباء
+                    parent = doctors_frame
+                    
+                chk = ttk.Checkbutton(parent, text=label, variable=var,
                                       command=lambda l=label: self._on_doctor_lab_toggle(l))
-                chk.pack(anchor="w", pady=2)
+                chk.pack(side="left", padx=5, pady=5, anchor="n")
 
     def _load_route_day(self):
         from datetime import datetime
@@ -1660,12 +1698,6 @@ class MedicalTransApp(tb.Window):
             )
             new_rows.append(row)
 
-        # جلب بيانات المخابر
-        labs = self.get_lab_transfers_by_weekday(weekday_key, current_date)
-        for lab in labs:
-            row = (lab["name"], "", "", "", lab["address"], "")
-            new_rows.append(row)
-
         # حفظ البيانات المؤقتة
         day_key = current_date.strftime("%Y-%m-%d")
         self.route_temp_data[day_key] = new_rows
@@ -1682,11 +1714,6 @@ class MedicalTransApp(tb.Window):
         # ✅ دمج الأطباء والمخابر في قائمة واحدة
         doctor_lab_items = []
 
-        for doc in available_doctors:
-            lab_display = doc['lab'].replace("\n", " / ").strip()
-            label = f"🧑‍⚕️ {doc['name']} 🔗 {lab_display}"
-            doctor_lab_items.append(label)
-
         for lab in all_labs:
             doctor_lab_items.append(f"🧪 {lab}")
 
@@ -1702,9 +1729,7 @@ class MedicalTransApp(tb.Window):
             var.trace_add("write", lambda *_args, l=label: self._on_doctor_lab_toggle(l))
             self._doctor_lab_vars[label] = var
 
-        # تعيين القيم في قائمة الطبيب / المخبر
-        self._route_inputs["doctor_combo"]["values"] = doctor_lab_items
-        self._route_inputs["doctor_combo"].set("")
+        self._update_doctor_checkbuttons("")
 
         # داخل _load_route_day()
         driver_name = self._route_inputs["driver_combo"].get()
@@ -1857,16 +1882,65 @@ class MedicalTransApp(tb.Window):
         self._route_save_btn.pack_forget()
         self._load_route_day()
 
+    def _is_note_row(self, row):
+        row = (list(row) + [""] * 6)[:6]
+        return all(not (cell or "").strip() for cell in row[:5]) and (row[5] or "").strip()
+
     def _add_manual_route_row(self):
-        current_date = self.route_days[self.current_route_index]
-        day_key = current_date.strftime("%Y-%m-%d")
-        if day_key not in self.route_temp_data:
-            self.route_temp_data[day_key] = []
-        self.route_temp_data[day_key].append(["", "", "", "", "", ""])
-        self._draw_route_preview()
+        import tkinter as tk
+        from tkinter import ttk
+
+        popup = tk.Toplevel(self)
+        popup.title("➕ إضافة صف يدوي")
+
+        # احصل على إحداثيات نافذة Route الحالية
+        parent = self._route_popup
+        parent.update_idletasks()
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+
+        popup_width = 300
+        popup_height = 160
+        x = parent_x + (parent_width // 2) - (popup_width // 2)
+        y = parent_y + (parent_height // 2) - (popup_height // 2)
+
+        popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
+        popup.transient(parent)
+        popup.grab_set()
+
+        row_type = tk.StringVar(value="normal")
+
+        ttk.Label(popup, text="نوع الصف:", font=("Segoe UI", 10, "bold")).pack(pady=(15, 5))
+        ttk.Radiobutton(popup, text="🔹 صف متعدد الأعمدة", variable=row_type, value="normal").pack(anchor="w", padx=20)
+        ttk.Radiobutton(popup, text="📝 صف ملاحظات عامة (ممتد)", variable=row_type, value="note_only").pack(anchor="w", padx=20)
+
+        def add_row():
+            current_date = self.route_days[self.current_route_index]
+            day_key = current_date.strftime("%Y-%m-%d")
+            if day_key not in self.route_temp_data:
+                self.route_temp_data[day_key] = []
+
+            if row_type.get() == "note_only":
+                row = [""] * 6
+                row[5] = "__note_only__"
+                self.route_temp_data[day_key].append(row)
+            else:
+                self.route_temp_data[day_key].append(["", "", "", "", "", ""])
+
+            popup.destroy()
+            self._draw_route_preview()
+
+        ttk.Button(popup, text="✔️ إضافة", command=add_row).pack(pady=15)
 
     def _add_selected_doctor_to_table(self):
-        selected = self._route_inputs["doctor_combo"].get()
+        # 🔄 نحصل على أول عنصر مفعّل من Checkbuttons
+        selected = next((name for name, var in self._doctor_lab_vars.items() if var.get()), None)
+
+        if not selected:
+            self.show_message("warning", "❌ لم يتم تحديد طبيب أو مخبر.")
+            return
 
         if selected.startswith("🧑‍⚕️ "):
             name = selected.replace("🧑‍⚕️ ", "")
@@ -1875,36 +1949,40 @@ class MedicalTransApp(tb.Window):
                 self.show_message("warning", "❌ طبيب غير موجود.")
                 return
 
-            time = doctor["time"]
-            lab = doctor["lab"]
-            desc = doctor["desc"]
-            address = doctor["address"]
-            notes = doctor["notes"]  # ✅ الحل هنا
+            row = (
+                doctor["name"],
+                doctor["time"],
+                doctor["lab"],
+                doctor["materials"],
+                doctor["address"],
+                doctor["notes"] or ""
+            )
 
         elif selected.startswith("🧪 "):
             name = selected.replace("🧪 ", "")
-            time = ""
-            lab = ""
-            desc = ""
-            address = self.get_lab_address_by_name(name)
-            notes = ""
+            row = (
+                name,     # اسم المخبر
+                "",       # الوقت
+                "",       # المخبر
+                "",       # المواد
+                self.get_lab_address_by_name(name),
+                ""        # ملاحظات
+            )
 
         else:
             self.show_message("warning", "❌ يرجى اختيار طبيب أو مخبر من القائمة.")
             return
 
-        row = (
-            doctor["name"],
-            time,
-            lab,
-            doctor["materials"],
-            address,
-            notes or ""
-        )
-
         day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
-        self.route_temp_data.setdefault(day_key, []).append(row)
 
+        # ✅ منع التكرار
+        existing = self.route_temp_data.get(day_key, [])
+        if any(r[0] == row[0] for r in existing):
+            self.show_message("warning", f"⚠️ '{row[0]}' موجود بالفعل في الجدول بنفس الوقت.")
+            return
+
+        self.route_temp_data.setdefault(day_key, []).append(row)
+        self.route_temp_data[day_key].sort(key=lambda row: self._extract_sort_time(row[1]))
         self._draw_route_preview()
 
     def get_lab_address_by_name(self, name):
@@ -1979,6 +2057,10 @@ class MedicalTransApp(tb.Window):
 
         self._draw_route_preview()
 
+    def is_note_row(self, row):
+        row = (list(row) + [""] * 6)[:6]
+        return all(not (cell or "").strip() for cell in row[:5]) and (row[5] or "").strip()
+
     def _draw_route_preview(self):
         import tkinter as tk
         import tkinter.font as tkfont
@@ -2017,8 +2099,8 @@ class MedicalTransApp(tb.Window):
         y = 20
 
         canvas.create_text(10, y, anchor="nw", text=f"🕗 بداية العمل: {start_hour}", font=("Segoe UI", 10, "bold"))
-        canvas.create_text(total_width // 2, y, anchor="n", text=f"📅 التاريخ: {readable_date}", font=("Segoe UI", 10, "bold"))
-        canvas.create_text(total_width - 10, y, anchor="ne", text=f"🚗 السائق: {driver}", font=("Segoe UI", 10, "bold"))
+        canvas.create_text(total_width // 2, y, anchor="n", text=f"🗕️ التاريخ: {readable_date}", font=("Segoe UI", 10, "bold"))
+        canvas.create_text(total_width - 10, y, anchor="ne", text=f"🚗 {driver}", font=("Segoe UI", 10, "bold"))
         y += 30
 
         for i, header in enumerate(headers):
@@ -2033,16 +2115,222 @@ class MedicalTransApp(tb.Window):
         font_conf = ("Segoe UI", 9)
         font_obj = tkfont.Font(font=font_conf)
 
+        self._x_positions = x_positions
+        self._col_widths = col_widths
+        self._font_obj = font_obj
+        self._font_conf = font_conf
+        self._start_table_y = start_table_y
+        self._row_y_positions = []
+
+        note_only_ranges = []
+
         for row_index, row in enumerate(rows):
+            if self.is_note_row(row):
+                self._row_y_positions.append(y)
+    
+                text_content = row[5].strip()
+                lines = text_content.split("\n")
+                line_height = font_obj.metrics("linespace")
+                padding = 12
+                row_height = len(lines) * line_height + padding
+
+                note_tag = f"note_cell_{row_index}"
+                canvas.create_rectangle(0, y, total_width, y + row_height, fill="#ffffff", tags=(note_tag,))
+
+                canvas.create_text(
+                    10, y + 6,
+                    anchor="nw",
+                    text=text_content,
+                    font=font_conf,
+                    width=total_width - 40,
+                    fill="black",  # ✅ لون أسود
+                    tags=(note_tag,)
+                )
+
+                canvas.create_text(
+                    total_width - 14, y + 6,
+                    anchor="ne",
+                    text="✏️",
+                    font=("Segoe UI", 8),
+                    tags=(note_tag,)
+                )
+                canvas.tag_bind(note_tag, "<Button-1>", lambda e, ri=row_index: self._edit_note_only_row(ri))
+                note_only_ranges.append((y, y + row_height))
+                y += row_height
+                continue
+
             row_data = list(row)
             cell_heights = []
-
-            # حساب ارتفاع كل الأعمدة ما عدا "ملاحظات"
-            for i in range(len(headers) - 1):
+            for i in range(len(headers)):
                 text = str(row_data[i])
                 width_limit = col_widths[i] - 8
-                words = text.split()
                 lines = []
+                for raw_line in text.split("\n"):
+                    words = raw_line.split()
+                    current_line = ""
+                    for word in words:
+                        test_line = current_line + " " + word if current_line else word
+                        if font_obj.measure(test_line) <= width_limit:
+                            current_line = test_line
+                        else:
+                            lines.append(current_line)
+                            current_line = word
+                    if current_line or not words:
+                        lines.append(current_line or " ")
+                lines.append("")
+                line_height = font_obj.metrics("linespace")
+                padding = 12
+                total_height = len(lines) * line_height + padding
+                cell_heights.append(total_height)
+
+            row_height = max(cell_heights)
+            self._row_y_positions.append(y)
+
+            for i in range(len(headers)):
+                x = x_positions[i]
+                canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff")
+                text = str(row_data[i])
+                width_limit = col_widths[i] - (30 if i == len(headers) - 1 else 8)
+                lines = []
+                for raw_line in text.split("\n"):
+                    words = raw_line.split()
+                    current_line = ""
+                    for word in words:
+                        test_line = current_line + " " + word if current_line else word
+                        if font_obj.measure(test_line) <= width_limit:
+                            current_line = test_line
+                        else:
+                            lines.append(current_line)
+                            current_line = word
+                    if current_line or not words:
+                        lines.append(current_line or " ")
+                lines.append("")
+                line_height = font_obj.metrics("linespace")
+                total_height = len(lines) * line_height
+                text_y_offset = 6
+    
+                if i == len(headers) - 1:
+                    cell_tag = f"note_cell_{row_index}"
+                    canvas.create_text(
+                        x + 4, y + text_y_offset,
+                        anchor="nw",
+                        text=text,
+                        font=font_conf,
+                        width=col_widths[i] - 30,
+                        fill="red",
+                        tags=(cell_tag,)
+                    )
+                    icon_y = y + min(6, row_height - 12)
+                    canvas.create_text(
+                        x + col_widths[i] - 14, icon_y,
+                        anchor="ne",
+                        text="✏️",
+                        font=("Segoe UI", 8),
+                        tags=(cell_tag,)
+                    )
+                    canvas.tag_bind(cell_tag, "<Button-1>",
+                        lambda e, ri=row_index, xx=x, yy=y, ww=col_widths[i]:
+                            self._edit_notes_in_cell(ri, xx, yy, ww)
+                    )
+                else:
+                    canvas.create_text(
+                        x + 4, y + text_y_offset,
+                        anchor="nw",
+                        text=text,
+                        font=font_conf,
+                        width=col_widths[i] - 8
+                    )
+
+            y += row_height
+
+        x = 0
+        for width in col_widths:
+            y_start = start_table_y - default_row_height
+            for note_start, note_end in note_only_ranges:
+                canvas.create_line(x, y_start, x, note_start, fill="#000000")
+                canvas.create_line(x, note_end, x, y, fill="#000000")
+                y_start = note_end
+            if not note_only_ranges:
+                canvas.create_line(x, start_table_y - default_row_height, x, y, fill="#000000")
+            x += width
+
+        # خط عمودي نهائي
+        y_start = start_table_y - default_row_height
+        for note_start, note_end in note_only_ranges:
+            canvas.create_line(x, y_start, x, note_start, fill="#000000")
+            canvas.create_line(x, note_end, x, y, fill="#000000")
+            y_start = note_end
+        if not note_only_ranges:
+            canvas.create_line(x, y_start, x, y, fill="#000000")
+
+        canvas.create_line(0, y, total_width, y, fill="#000000")
+        canvas.config(scrollregion=(0, 0, total_width, y + 20))
+
+    def _edit_note_only_row(self, row_index):
+        import tkinter as tk
+
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+        row = (list(self.route_temp_data[day_key][row_index]) + [""] * 6)[:6]
+
+        current_value = row[5]
+
+        parent = self._route_popup
+        parent.update_idletasks()
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+
+        popup_width = 420
+        popup_height = 240
+        x = parent_x + (parent_width // 2) - (popup_width // 2)
+        y = parent_y + (parent_height // 2) - (popup_height // 2)
+
+        top = tk.Toplevel(self)
+        top.title("✏️ تعديل الملاحظات")
+        top.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
+        top.transient(parent)
+        top.grab_set()
+
+        content_frame = tk.Frame(top)
+        content_frame.pack(fill="both", expand=True, padx=10, pady=(10, 5))
+
+        text = tk.Text(content_frame, font=("Segoe UI", 10), height=6)
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", "" if current_value == "__note_only__" else current_value)
+
+        button_frame = tk.Frame(top)
+        button_frame.pack(fill="x", pady=(0, 10))
+
+        def save_note():
+            new_note = text.get("1.0", "end").strip()
+            if not new_note:
+                new_note = "__note_only__"
+
+            row = [""] * 6
+            row[5] = new_note
+            self.route_temp_data[day_key][row_index] = row
+
+            self._draw_route_preview()
+            top.destroy()
+
+        save_button = tk.Button(button_frame, text="💾 حفظ", font=("Segoe UI", 10, "bold"), command=save_note)
+        save_button.pack(anchor="center", pady=5)
+
+    def _draw_route_row(self, canvas, row_index, x_positions, col_widths, font_obj, font_conf, start_y):
+        day = self.route_days[self.current_route_index]
+        day_key = day.strftime("%Y-%m-%d")
+        row_data = list(self.route_temp_data[day_key][row_index])
+        headers = ["الطبيب / المخبر", "Zeit", "المخبر", "Beschreibung", "العنوان", "ملاحظات/مواد"]
+
+        cell_heights = []
+        for i in range(len(headers)):
+            text = str(row_data[i])
+            width_limit = col_widths[i] - 8
+            lines = []
+            for raw_line in text.split("\n"):
+                words = raw_line.split()
                 current_line = ""
                 for word in words:
                     test_line = current_line + " " + word if current_line else word
@@ -2053,112 +2341,127 @@ class MedicalTransApp(tb.Window):
                         current_line = word
                 if current_line:
                     lines.append(current_line)
-                line_height = font_obj.metrics("linespace")
-                total_height = len(lines) * line_height + 8
-                cell_heights.append(total_height)
+            line_height = font_obj.metrics("linespace")
+            total_height = len(lines) * line_height + 8
+            cell_heights.append(total_height)
 
-            # حساب ارتفاع عمود "ملاحظات"
-            notes_text = str(row_data[-1])
-            width_limit = col_widths[-1] - 8
-            words = notes_text.split()
+        row_height = max(cell_heights)
+        y = self._row_y_positions[row_index]
+
+        for i in range(len(headers)):
+            x = x_positions[i]
+            canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff")
+
+            text = str(row_data[i])
+            width_limit = col_widths[i] - (30 if i == len(headers) - 1 else 8)
+
             lines = []
-            current_line = ""
-            for word in words:
-                test_line = current_line + " " + word if current_line else word
-                if font_obj.measure(test_line) <= width_limit:
-                    current_line = test_line
-                else:
-                    lines.append(current_line)
-                    current_line = word
-            if current_line:
-                lines.append(current_line)
-            notes_height = len(lines) * font_obj.metrics("linespace") + 8
-            cell_heights.append(notes_height)
-
-            row_height = max(cell_heights)
-
-            for i in range(len(headers)):
-                x = x_positions[i]
-                canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff")
-
-                if i == len(headers) - 1:
-                    text_widget = tk.Text(canvas, font=font_conf, wrap="word", bd=0)
-                    text_widget.tag_configure("red", foreground="red")
-                    text_widget.insert("1.0", str(row_data[i]), "red")
-
-                    def on_modified(event, row_index=row_index):
-                        event.widget.edit_modified(False)
-                        self._update_notes_from_widgets()
-
-                    text_widget.bind("<<Modified>>", on_modified)
-                    text_widget.edit_modified(False)
-
-                    canvas.create_window(
-                        x + 2, y + 2,
-                        anchor="nw",
-                        window=text_widget,
-                        width=col_widths[i] - 4,
-                        height=row_height - 4
-                    )
-                    self._notes_vars.append(text_widget)
-                else:
-                    canvas.create_text(
-                        x + 4, y + 4,
-                        anchor="nw",
-                        text=str(row_data[i]),
-                        font=font_conf,
-                        width=col_widths[i] - 8
-                    )
-
-            y += row_height
-
-        x = 0
-        for width in col_widths:
-            canvas.create_line(x, start_table_y - default_row_height, x, y, fill="#000000")
-            x += width
-        canvas.create_line(x, start_table_y - default_row_height, x, y, fill="#000000")
-        canvas.create_line(0, y, total_width, y, fill="#000000")
-
-        def on_canvas_click(event):
-            ex, ey = event.x, event.y
-            cursor_y = start_table_y
-            for row_index, row in enumerate(rows):
-                row_data = list(row)
-                cell_heights = []
-                for i in range(len(headers)):
-                    text = str(row_data[i])
-                    width_limit = col_widths[i] - 8
-                    words = text.split()
-                    lines = []
-                    current_line = ""
-                    for word in words:
-                        test_line = current_line + " " + word if current_line else word
-                        if font_obj.measure(test_line) <= width_limit:
-                            current_line = test_line
-                        else:
-                            lines.append(current_line)
-                            current_line = word
-                    if current_line:
+            for raw_line in text.split("\n"):
+                words = raw_line.split()
+                current_line = ""
+                for word in words:
+                    test_line = current_line + " " + word if current_line else word
+                    if font_obj.measure(test_line) <= width_limit:
+                        current_line = test_line
+                    else:
                         lines.append(current_line)
-                    est_height = len(lines) * font_obj.metrics("linespace") + 8
-                    cell_heights.append(est_height)
+                        current_line = word
+                if current_line:
+                    lines.append(current_line)
+            line_height = font_obj.metrics("linespace")
+            total_height = len(lines) * line_height
+            text_y_offset = (row_height - total_height) // 2
 
-                row_height = max(cell_heights)
+            if i == len(headers) - 1:
+                cell_tag = f"note_cell_{row_index}"
+                canvas.create_text(
+                    x + 4, y + text_y_offset,
+                    anchor="nw",
+                    text=text,
+                    font=font_conf,
+                    width=col_widths[i] - 30,
+                    fill="red",
+                    tags=(cell_tag,)
+                )
 
-                if cursor_y <= ey <= cursor_y + row_height:
-                    if x_positions[0] <= ex <= x_positions[1]:
-                        self._show_doctor_selector(row_index, x_positions[0], cursor_y)
-                    elif x_positions[1] <= ex <= x_positions[2]:
-                        self._show_time_selector(row_index, x_positions[1], cursor_y)
-                    elif x_positions[2] <= ex <= x_positions[3]:
-                        self._show_lab_selector(row_index, x_positions[2], cursor_y)
-                    elif x_positions[3] <= ex <= x_positions[4]:
-                        self._show_material_selector(row_index, x_positions[3], cursor_y)
-                    return
-                cursor_y += row_height
+                icon_y = y + min(6, row_height - 12)
+                canvas.create_text(
+                    x + col_widths[i] - 14, icon_y,
+                    anchor="ne",
+                    text="✏️",
+                    font=("Segoe UI", 8),
+                    tags=(cell_tag,)
+                )
 
-        canvas.bind("<Button-1>", on_canvas_click)
-        canvas.config(scrollregion=(0, 0, total_width, y + 20))
+                canvas.tag_bind(
+                    cell_tag, "<Button-1>",
+                    lambda e, rx=row_index, xx=x, yy=y, ww=col_widths[i]:
+                        self._edit_notes_in_cell(rx, xx, yy, ww)
+                )
+            else:
+                canvas.create_text(
+                    x + 4, y + text_y_offset,
+                    anchor="nw",
+                    text=text,
+                    font=font_conf,
+                    width=col_widths[i] - 8
+                )
+
+    def _edit_notes_in_cell(self, row_index, x, y, width):
+        import tkinter as tk
+        from tkinter import ttk
+
+        canvas = self.route_preview_canvas
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+        current_value = str(self.route_temp_data[day_key][row_index][-1])
+
+        # ✅ إنشاء نافذة تابعة لنافذة البرنامج الرئيسية (ليست فوق كل شيء)
+        popup = tk.Toplevel(canvas)
+        popup.transient(canvas.winfo_toplevel())  # ✅ اجعلها تابعة لنافذة البرنامج
+        popup.wm_title("تحرير الملاحظات")
+        popup.geometry(f"{width-10}x200+{canvas.winfo_rootx()+x}+{canvas.winfo_rooty()+y+40}")
+        popup.grab_set()
+
+        # === إطار النص مع التمرير ===
+        frame = tk.Frame(popup)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        text_area = tk.Text(frame, font=("Segoe UI", 9), wrap="word")
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text_area.yview)
+        text_area.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        text_area.pack(side="left", fill="both", expand=True)
+        text_area.insert("1.0", current_value)
+        text_area.focus_set()
+
+        # === أزرار حفظ / إلغاء ===
+        btn_frame = tk.Frame(popup)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_and_close():
+            new_value = text_area.get("1.0", "end-1c").strip()
+            updated_row = list(self.route_temp_data[day_key][row_index])
+            updated_row[-1] = new_value
+            self.route_temp_data[day_key][row_index] = tuple(updated_row)
+            popup.destroy()
+            self._draw_route_preview()
+
+        ttk.Button(btn_frame, text="💾 حفظ", command=save_and_close).pack(side="right", padx=5)
+        ttk.Button(btn_frame, text="❌ إلغاء", command=popup.destroy).pack(side="left", padx=5)
+
+        # اختصارات لوحة المفاتيح
+        text_area.bind("<Control-Return>", lambda e: save_and_close())
+        text_area.bind("<Escape>", lambda e: popup.destroy())
+
+        # تحديث الارتفاع تلقائيًا
+        def auto_resize(event=None):
+            lines = text_area.get("1.0", "end-1c").count('\n') + 1
+            text_area.configure(height=min(max(3, lines), 15))
+
+        text_area.bind("<KeyRelease>", auto_resize)
+        auto_resize()
 
     def _show_doctor_selector(self, row_index, x, y):
         import tkinter as tk
@@ -2374,6 +2677,7 @@ class MedicalTransApp(tb.Window):
             current_row = list(self.route_temp_data[day_key][row_index])
             current_row[1] = value
             self.route_temp_data[day_key][row_index] = tuple(current_row)
+            self.route_temp_data[day_key].sort(key=lambda row: self._extract_sort_time(row[1]))
             canvas.delete(window_id)
             del self._active_time_selector
             del self._active_time_window_id
@@ -2394,6 +2698,16 @@ class MedicalTransApp(tb.Window):
                         self._draw_route_preview()
 
         canvas.bind("<Button-1>", close_if_click_outside, add="+")
+
+    def _extract_sort_time(self, time_str):
+        import re
+        if not time_str or not isinstance(time_str, str):
+            return (99, 99)  # ضع غير المحددين في النهاية
+
+        match = re.search(r"(\d{2}):(\d{2})", time_str)
+        if match:
+            return tuple(map(int, match.groups()))
+        return (99, 99)
 
     def _show_lab_selector(self, row_index, x, y):
         import tkinter as tk
@@ -2602,7 +2916,7 @@ class MedicalTransApp(tb.Window):
         return times
 
     def _update_notes_from_widgets(self):
-        """تحديث آخر عمود (الملاحظات/المواد) من مربعات النص إلى self.route_temp_data"""
+        """تحديث عمود الملاحظات من Text widgets إلى self.route_temp_data"""
         day = self.route_days[self.current_route_index]
         day_key = day.strftime("%Y-%m-%d")
 
@@ -2610,21 +2924,24 @@ class MedicalTransApp(tb.Window):
             return
 
         rows = self.route_temp_data[day_key]
-        for row_index, text_widget in enumerate(self._notes_vars):
+        for row_index, (text_widget, _) in enumerate(self._notes_vars):  # ✅ استخراج Text فقط
             if row_index < len(rows):
                 notes_text = text_widget.get("1.0", "end-1c").strip()
-                current_row = list(rows[row_index])          # ✅ التحويل إلى list
-                current_row[-1] = notes_text                 # ✅ تحديث عمود الملاحظات
-                rows[row_index] = current_row                # ✅ إعادة الحفظ بعد التعديل
+                rows[row_index] = list(rows[row_index])
+                rows[row_index][-1] = notes_text
 
-    def _save_full_route(self):
+    def _save_full_route(self, apply_only=False):
         import sqlite3
 
         name = self._route_inputs["name_entry"].get().strip()
         driver = self._route_inputs["driver_combo"].get().strip()
 
-        if not name or not driver:
-            self.show_message("warning", "يرجى إدخال اسم Route واختيار السائق.")
+        if not name:
+            self.show_message("warning", "❌ يرجى إدخال اسم Route.")
+            return
+
+        if not hasattr(self, "route_driver_names") or not hasattr(self, "route_start_hours"):
+            self.show_message("error", "❌ بيانات السائق أو بداية العمل غير متوفرة.")
             return
 
         editing_mode = hasattr(self, "_editing_route_id") and self._editing_route_id is not None
@@ -2649,18 +2966,29 @@ class MedicalTransApp(tb.Window):
 
                 for date in self.route_days:
                     day_key = date.strftime("%Y-%m-%d")
+
                     rows = self.route_temp_data.get(day_key, [])
                     if not rows:
-                        continue
+                        continue  # تخطي الأيام التي لا تحتوي على صفوف
 
-                    # إدخال في جدول routes
+                    # التحقق من بداية العمل
+                    start_hour = self.route_start_hours.get(day_key, "").strip()
+                    if not start_hour:
+                        self.show_message("warning", f"❌ يرجى تحديد بداية العمل ليوم {day_key}.")
+                        return
+
+                    # التحقق من السائق
+                    driver_name = self.route_driver_names.get(day_key, "").strip()
+                    if not driver_name:
+                        self.show_message("warning", f"❌ يرجى اختيار السائق ليوم {day_key}.")
+                        return
+
                     c.execute("""
                         INSERT INTO routes (name, date, driver)
                         VALUES (?, ?, ?)
-                    """, (name, day_key, driver))
+                    """, (name, day_key, driver_name))
                     route_id = c.lastrowid
 
-                    # إدخال في جدول route_tasks
                     for row in rows:
                         doctor, time, lab, desc, address, notes = row
                         if isinstance(notes, list):
@@ -2672,131 +3000,120 @@ class MedicalTransApp(tb.Window):
                                 if isinstance(notes_list, list):
                                     notes = ", ".join(str(item) for item in notes_list)
                             except:
-                                pass  # إذا فشل التحويل نتركها كما هي
+                                pass
                         c.execute("""
                             INSERT INTO route_tasks (route_name, date, driver, name, time, lab, description, address, notes)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (name, day_key, driver, doctor, time, lab, desc, address, notes))
+                        """, (name, day_key, driver_name, doctor, time, lab, desc, address, notes))
 
                 conn.commit()
 
-            # تنظيف بعد الحفظ
             if editing_mode:
                 del self._editing_route_id
 
-            self._route_popup.destroy()
-            self._refresh_route_cards()
-            self.show_message("success", "✅ تم حفظ Route بنجاح.")
+            if not apply_only:
+                self._route_popup.destroy()
+                self._refresh_route_cards()
+                self.show_message("success", "✅ تم حفظ Route بنجاح.")
+            else:
+                self._refresh_route_cards()  # ✅ ضروري لتحديث البطاقات دون إغلاق
+                self.show_message("info", "✅ تم تطبيق التغييرات بنجاح.")
 
         except Exception as e:
             self.show_message("error", f"حدث خطأ أثناء الحفظ:\n{e}")
 
     def _print_route_pdf(self):
         from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.pdfgen import canvas
-        from tkinter import filedialog
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        import tempfile, os
 
         if not self.route_days:
-            self.show_message("warning", "لا توجد بيانات Route للطباعة.")
+            self.show_message("info", "🚫 لا توجد بيانات Route للطباعة.")
             return
 
-        # اختيار مسار حفظ الملف
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".pdf",
-            filetypes=[("PDF files", "*.pdf")],
-            title="حفظ Route كـ PDF"
-        )
-        if not file_path:
-            return
-        self._update_notes_from_widgets()  # ✅ تحديث الملاحظات قبل الطباعة
+        self._update_notes_from_widgets()
 
-        try:
-            c = canvas.Canvas(file_path, pagesize=landscape(A4))
-            width, height = landscape(A4)
+        styles = getSampleStyleSheet()
+        wrapped_style = ParagraphStyle(name='Wrapped', fontName='Helvetica', fontSize=9, wordWrap='CJK', leading=12)
+        red_style = ParagraphStyle(name='Red', fontName='Helvetica', fontSize=9, textColor=colors.red, wordWrap='CJK', leading=13, spaceAfter=2,)
 
-            for day in self.route_days:
-                day_key = day.strftime("%Y-%m-%d")
-                rows = self.route_temp_data.get(day_key, [])
-                if not rows:
-                    continue
+        headers = ["الطبيب / المخبر", "Zeit", "المخبر", "Beschreibung", "العنوان", "ملاحظات/مواد"]
+        all_data = []
 
-                # رأس الصفحة
-                c.setFont("Helvetica-Bold", 12)
-                c.drawString(30, height - 40, f"📅 {day.strftime('%A %d/%m/%Y')}   🚗 السائق: {self._route_inputs['driver_combo'].get().strip()}   📛 Route: {self._route_inputs['name_entry'].get().strip()}")
+        for day in self.route_days:
+            day_key = day.strftime("%Y-%m-%d")
+            rows = self.route_temp_data.get(day_key, [])
+            if not rows:
+                continue
 
-                # رؤوس الأعمدة
-                headers = ["الطبيب / المخبر", "Zeit", "المخبر", "Beschreibung", "العنوان", "الملاحظات / المواد"]
-                col_widths = [110, 70, 80, 130, 190, 220]
-                x_positions = [30]
-                for w in col_widths[:-1]:
-                    x_positions.append(x_positions[-1] + w)
-                y = height - 70
+            driver = self.route_driver_names.get(day_key, self._route_inputs["driver_combo"].get())
+            start_hour = self.route_start_hours.get(day_key, self._route_inputs["start_hour_combo"].get())
+            weekday_names = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+            readable_date = f"{weekday_names[day.weekday()]} - {day.strftime('%d-%m-%Y')}"
 
-                c.setFont("Helvetica-Bold", 10)
-                for i, header in enumerate(headers):
-                    c.drawString(x_positions[i], y, header)
-                y -= 20
+            table_data = [headers]
+            for row in rows:
+                formatted_row = []
+                for i, cell in enumerate(row):
+                    style = red_style if i == 5 else wrapped_style
+                    cell = str(cell).replace("\n", "<br/>")
+                    if not cell.strip():
+                        cell = "&nbsp;"
+                    para = Paragraph(cell, style)
+                    formatted_row.append(para)
+                table_data.append(formatted_row)
 
-                # محتوى الجدول
-                c.setFont("Helvetica", 9)
-                line_height = 12  # ارتفاع السطر
+            all_data.append({
+                "date": readable_date,
+                "driver": driver,
+                "start": start_hour,
+                "table": table_data
+            })
 
-                for row in rows:
-                    max_cell_height = 0
-                    cell_lines_per_col = []
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        doc = SimpleDocTemplate(temp_file.name, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=50, bottomMargin=30)
+        elements = []
 
-                    for i, text in enumerate(row):
-                        text = str(text)
-                        col_width = col_widths[i]
-                        x = x_positions[i]
+        for entry in all_data:
+            header_table = Table([
+                [
+                    Paragraph(f"📅 {entry['date']}", styles["Normal"]),
+                    Paragraph(f"🕘 بداية العمل: {entry['start']}", styles["Normal"]),
+                    Paragraph(f"🚗 السائق: {entry['driver']}", styles["Normal"])
+                ]
+            ], colWidths=[200, 350, 200])
+            header_table.setStyle(TableStyle([
+                ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ]))
+            elements.append(header_table)
+            elements.append(Spacer(1, 12))
 
-                        # التفاف يدوي للنص داخل الخلية
-                        words = text.split()
-                        lines = []
-                        current_line = ""
+            t = Table(entry["table"], repeatRows=1, colWidths='*')
+            style = TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.gray),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),  # ✅ توسيط أسماء الأعمدة أفقيًا
+                ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),  # ✅ توسيط أسماء الأعمدة عموديًا
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                ("ALIGN", (0, 1), (-1, -1), "LEFT"),
+                ("VALIGN", (0, 1), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ])
+            t.setStyle(style)
+            elements.append(t)
+            elements.append(Spacer(1, 30))
 
-                        for word in words:
-                            test_line = current_line + " " + word if current_line else word
-                            if c.stringWidth(test_line, "Helvetica", 9) <= col_width:
-                                current_line = test_line
-                            else:
-                                lines.append(current_line)
-                                current_line = word
-                        if current_line:
-                            lines.append(current_line)
-
-                        cell_lines_per_col.append(lines)
-                        max_cell_height = max(max_cell_height, len(lines) * line_height)
-
-                    # تحقق من وجود مساحة كافية في الصفحة
-                    if y - max_cell_height < 40:
-                        c.showPage()
-                        c.setFont("Helvetica-Bold", 10)
-                        y = height - 50
-                        for i, header in enumerate(headers):
-                            c.drawString(x_positions[i], y, header)
-                        y -= 20
-                        c.setFont("Helvetica", 9)
-
-                    # رسم كل خلية بالنص وحدودها
-                    for i, lines in enumerate(cell_lines_per_col):
-                        x = x_positions[i]
-                        col_width = col_widths[i]
-    
-                        for j, line in enumerate(lines):
-                            c.drawString(x + 2, y - j * line_height, line)
-
-                        # مستطيل الحدود حول الخلية
-                        c.rect(x - 1, y - max_cell_height, col_width, max_cell_height)
-
-                    y -= max_cell_height + 4  # المسافة بين الصفوف
-
-                c.showPage()
-
-            c.save()
-            self.show_message("success", "✅ تم إنشاء ملف PDF بنجاح.")
-        except Exception as e:
-            self.show_message("error", f"فشل إنشاء PDF:\n{e}")
+        doc.build(elements)
+        os.startfile(temp_file.name)
 
     def _main_preview_load_driver(self):
         import sqlite3
@@ -6631,17 +6948,19 @@ class MedicalTransApp(tb.Window):
                 if weekdays and weekday_times:
                     days = weekdays.strip().splitlines()
                     times = weekday_times.strip().splitlines()
+                    print(f"📆 الطبيب {name} لديه أيام: {days} والتوقيتات: {times}")
                     label_to_key = {
                         "الإثنين": "mon", "الثلاثاء": "tue", "الأربعاء": "wed",
                         "الخميس": "thu", "الجمعة": "fri"
                     }
-                    matched = False
-                    for day, time in zip(days, times):
-                        if label_to_key.get(day.strip()) == weekday_key:
-                            matched = True
+                    for i in range(len(days)):
+                        label = days[i].strip().replace(" ", "")
+                        expected_label = [k for k, v in label_to_key.items() if v == weekday_key]
+                        if expected_label and label.replace(" ", "") == expected_label[0].replace(" ", ""):
+                            time = times[i].strip()
                             break
-                    if not matched:
-                        continue
+                    else:
+                        continue  # لم يتم التطابق
                 else:
                     continue  # استبعاد الطبيب الذي لا يملك بيانات أيام
 
