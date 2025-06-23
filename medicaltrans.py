@@ -1919,11 +1919,14 @@ class MedicalTransApp(tb.Window):
                 self.route_temp_data[day_key] = []
 
             if row_type.get() == "note_only":
-                row = [""] * 6
-                row[5] = "__note_only__"
+                # 🟢 لا نتحقق من التكرار — نسمح بإضافة أكثر من صف ملاحظات عامة
+                row = ["", "", "", "", "", "__note_only__"]
                 self.route_temp_data[day_key].append(row)
+                print("✅ تم إضافة صف ملاحظات عامة:", row)
             else:
-                self.route_temp_data[day_key].append(["", "", "", "", "", ""])
+                row = ["", "", "", "", "", ""]
+                self.route_temp_data[day_key].append(row)
+                print("✅ تم إضافة صف عادي")
 
             popup.destroy()
             self._draw_route_preview()
@@ -2055,7 +2058,13 @@ class MedicalTransApp(tb.Window):
 
     def is_note_row(self, row):
         row = (list(row) + [""] * 6)[:6]
-        return all(not (cell or "").strip() for cell in row[:5]) and (row[5] or "").strip()
+        print(f"🔎 is_note_row فحص الصف: {repr(row)}")
+        result = all(not str(c).strip() for c in row[:5]) and str(row[5]).strip().startswith("__note_only__")
+        print(f"🧪 التحقق النهائي: {repr(row)}, النتيجة: {result}")
+        return result
+
+    def _make_note_edit_callback(self, row_index):
+        return lambda e: self._edit_note_only_row(row_index)
 
     def _draw_route_preview(self):
         import tkinter as tk
@@ -2071,9 +2080,20 @@ class MedicalTransApp(tb.Window):
         day_key = day.strftime("%Y-%m-%d")
         rows = self.route_temp_data.get(day_key, [])
 
-        # ✅ إصلاح البنية: تأكد أن كل صف يحتوي على 6 أعمدة على الأقل
-        for i, row in enumerate(rows):
-            rows[i] = (list(row) + [""] * 6)[:6]
+        # طباعة جميع الصفوف قبل أي معالجة
+        print("==== محتوى جميع الصفوف قبل المعالجة والرسم ====")
+        for idx, row in enumerate(rows):
+            print(f"{idx}: {repr(row)}")
+
+        for i in range(len(rows)):
+            rows[i] = (list(rows[i]) + [""] * 6)[:6]
+        self.route_temp_data[day_key] = rows
+
+        # طباعة الصفوف بعد التصحيح والتطويل (padding)
+        print("==== محتوى جميع الصفوف بعد التصحيح ====")
+        for idx, row in enumerate(rows):
+            print(f"{idx}: {repr(row)}")
+            print(f"  -> is_note_row: {self.is_note_row(row)}")
 
         weekday_names = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
         weekday_name = weekday_names[day.weekday()]
@@ -2109,7 +2129,6 @@ class MedicalTransApp(tb.Window):
             canvas.create_text(x + col_widths[i] // 2, y + default_row_height // 2, anchor="center", text=header, font=("Segoe UI", 10, "bold"))
 
         y += default_row_height
-        start_table_y = y
         self._notes_vars = []
 
         font_conf = ("Segoe UI", 9)
@@ -2119,150 +2138,33 @@ class MedicalTransApp(tb.Window):
         self._col_widths = col_widths
         self._font_obj = font_obj
         self._font_conf = font_conf
-        self._start_table_y = start_table_y
+        self._start_table_y = y
         self._row_y_positions = []
 
         note_only_ranges = []
 
-        for row_index, row in enumerate(rows):
-            if self.is_note_row(row):
-                self._row_y_positions.append(y)
-    
-                text_content = row[5].strip()
-                lines = text_content.split("\n")
-                line_height = font_obj.metrics("linespace")
-                padding = 12
-                row_height = len(lines) * line_height + padding
+        self._row_y_positions = []
 
-                note_tag = f"note_cell_{row_index}"
-                canvas.create_rectangle(0, y, total_width, y + row_height, fill="#ffffff", tags=(note_tag,))
-
-                canvas.create_text(
-                    10, y + 6,
-                    anchor="nw",
-                    text=text_content,
-                    font=font_conf,
-                    width=total_width - 40,
-                    fill="black",  # ✅ لون أسود
-                    tags=(note_tag,)
-                )
-
-                canvas.create_text(
-                    total_width - 14, y + 6,
-                    anchor="ne",
-                    text="✏️",
-                    font=("Segoe UI", 8),
-                    tags=(note_tag,)
-                )
-                canvas.tag_bind(note_tag, "<Button-1>", lambda e, ri=row_index: self._edit_note_only_row(ri))
-                note_only_ranges.append((y, y + row_height))
-                y += row_height
-                continue
-
-            row_data = list(row)
-            cell_heights = []
-            for i in range(len(headers)):
-                text = str(row_data[i])
-                width_limit = col_widths[i] - 8
-                lines = []
-                for raw_line in text.split("\n"):
-                    words = raw_line.split()
-                    current_line = ""
-                    for word in words:
-                        test_line = current_line + " " + word if current_line else word
-                        if font_obj.measure(test_line) <= width_limit:
-                            current_line = test_line
-                        else:
-                            lines.append(current_line)
-                            current_line = word
-                    if current_line or not words:
-                        lines.append(current_line or " ")
-                lines.append("")
-                line_height = font_obj.metrics("linespace")
-                padding = 12
-                total_height = len(lines) * line_height + padding
-                cell_heights.append(total_height)
-
-            row_height = max(cell_heights)
+        for row_index in range(len(rows)):
+            row_data = self.route_temp_data[day_key][row_index]
+            print(f"--> أثناء الرسم: الصف {row_index}: {repr(row_data)}")
+            print(f"    is_note_row: {self.is_note_row(row_data)}")
             self._row_y_positions.append(y)
+            if self.is_note_row(row_data):
+                y = self._draw_note_row(canvas, row_index, y)
+                # لا ترسم خطوط الأعمدة هنا
+            else:
+                row_height = self._draw_route_row(
+                    canvas, row_index,
+                    self._x_positions, self._col_widths,
+                    self._font_obj, self._font_conf, y
+                )
+                # هنا فقط ارسم خطوط الأعمدة لهذا الصف
+                for x in self._x_positions:
+                    canvas.create_line(x, y, x, y + row_height, fill="#000000")
+                y += row_height
 
-            for i in range(len(headers)):
-                x = x_positions[i]
-                canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff")
-                text = str(row_data[i])
-                width_limit = col_widths[i] - (30 if i == len(headers) - 1 else 8)
-                lines = []
-                for raw_line in text.split("\n"):
-                    words = raw_line.split()
-                    current_line = ""
-                    for word in words:
-                        test_line = current_line + " " + word if current_line else word
-                        if font_obj.measure(test_line) <= width_limit:
-                            current_line = test_line
-                        else:
-                            lines.append(current_line)
-                            current_line = word
-                    if current_line or not words:
-                        lines.append(current_line or " ")
-                lines.append("")
-                line_height = font_obj.metrics("linespace")
-                total_height = len(lines) * line_height
-                text_y_offset = 6
-    
-                if i == len(headers) - 1:
-                    cell_tag = f"note_cell_{row_index}"
-                    canvas.create_text(
-                        x + 4, y + text_y_offset,
-                        anchor="nw",
-                        text=text,
-                        font=font_conf,
-                        width=col_widths[i] - 30,
-                        fill="red",
-                        tags=(cell_tag,)
-                    )
-                    icon_y = y + min(6, row_height - 12)
-                    canvas.create_text(
-                        x + col_widths[i] - 14, icon_y,
-                        anchor="ne",
-                        text="✏️",
-                        font=("Segoe UI", 8),
-                        tags=(cell_tag,)
-                    )
-                    canvas.tag_bind(cell_tag, "<Button-1>",
-                        lambda e, ri=row_index, xx=x, yy=y, ww=col_widths[i]:
-                            self._edit_notes_in_cell(ri, xx, yy, ww)
-                    )
-                else:
-                    canvas.create_text(
-                        x + 4, y + text_y_offset,
-                        anchor="nw",
-                        text=text,
-                        font=font_conf,
-                        width=col_widths[i] - 8
-                    )
-
-            y += row_height
-
-        x = 0
-        for width in col_widths:
-            y_start = start_table_y - default_row_height
-            for note_start, note_end in note_only_ranges:
-                canvas.create_line(x, y_start, x, note_start, fill="#000000")
-                canvas.create_line(x, note_end, x, y, fill="#000000")
-                y_start = note_end
-            if not note_only_ranges:
-                canvas.create_line(x, start_table_y - default_row_height, x, y, fill="#000000")
-            x += width
-
-        # خط عمودي نهائي
-        y_start = start_table_y - default_row_height
-        for note_start, note_end in note_only_ranges:
-            canvas.create_line(x, y_start, x, note_start, fill="#000000")
-            canvas.create_line(x, note_end, x, y, fill="#000000")
-            y_start = note_end
-        if not note_only_ranges:
-            canvas.create_line(x, y_start, x, y, fill="#000000")
-
+        # بعد الحلقة، ارسم الخط الأفقي السفلي فقط
         canvas.create_line(0, y, total_width, y, fill="#000000")
         canvas.config(scrollregion=(0, 0, total_width, y + 20))
 
@@ -2298,22 +2200,24 @@ class MedicalTransApp(tb.Window):
 
         text = tk.Text(content_frame, font=("Segoe UI", 10), height=6)
         text.pack(fill="both", expand=True)
-        text.insert("1.0", "" if current_value == "__note_only__" else current_value)
+        text.insert("1.0", current_value.replace("__note_only__", "").lstrip())
 
         button_frame = tk.Frame(top)
         button_frame.pack(fill="x", pady=(0, 10))
 
         def save_note():
             new_note = text.get("1.0", "end").strip()
-            if not new_note:
-                new_note = "__note_only__"
+            row = self.route_temp_data[day_key][row_index]
+            if not new_note.strip():
+                new_note = ""
+            row[5] = f"__note_only__\n{new_note.strip()}"
 
             row = self.route_temp_data[day_key][row_index]
             while len(row) < 6:
                 row.append("")
             for i in range(5):
                 row[i] = ""
-            row[5] = new_note.strip() or "__note_only__"
+            row[5] = f"__note_only__\n{new_note.strip()}" if new_note.strip() else "__note_only__"
 
             self._draw_route_preview()
             top.destroy()
@@ -2409,6 +2313,58 @@ class MedicalTransApp(tb.Window):
                     font=font_conf,
                     width=col_widths[i] - 8
                 )
+        return row_height
+
+    def _draw_note_row(self, canvas, row_index, y):
+        day = self.route_days[self.current_route_index]
+        day_key = day.strftime("%Y-%m-%d")
+        row_data = list(self.route_temp_data[day_key][row_index])
+
+        font_conf = self._font_conf
+        font_obj = self._font_obj
+        total_width = sum(self._col_widths)
+
+        # ضمان وجود __note_only__
+        if not str(row_data[5]).startswith("__note_only__"):
+            row_data[5] = f"__note_only__\n{row_data[5]}"
+            self.route_temp_data[day_key][row_index] = ["", "", "", "", "", row_data[5]]
+
+        text_content = row_data[5].replace("__note_only__", "").lstrip()
+        # عالج النص الفارغ ليظهر سطر واحد على الأقل
+        lines = text_content.split("\n") if text_content.strip() else [""]
+
+        line_height = font_obj.metrics("linespace")
+        padding = 18  # إجمالي البادينغ (يوزع بين الأعلى والأسفل)
+        row_height = max(line_height, len(lines) * line_height) + padding
+
+        note_tag = f"note_cell_{row_index}"
+
+        # ارسم المستطيل للصف بالكامل
+        canvas.create_rectangle(0, y, total_width, y + row_height, fill="#ffffff", tags=(note_tag,))
+
+        # ابدأ النص من منتصف البادينغ الأعلى
+        text_start_y = y + (padding // 2)
+
+        canvas.create_text(
+            10, text_start_y,
+            anchor="nw",
+            text=text_content,
+            font=font_conf,
+            width=total_width - 40,
+            fill="black",
+            tags=(note_tag,)
+        )
+        # أيقونة التحرير بنفس محاذاة النص
+        canvas.create_text(
+            total_width - 14, text_start_y,
+            anchor="ne",
+            text="✏️",
+            font=("Segoe UI", 8),
+            tags=(note_tag,)
+        )
+        canvas.tag_bind(note_tag, "<Button-1>", self._make_note_edit_callback(row_index))
+
+        return y + row_height
 
     def _edit_notes_in_cell(self, row_index, x, y, width):
         import tkinter as tk
