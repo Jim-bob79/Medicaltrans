@@ -1778,9 +1778,13 @@ class MedicalTransApp(tb.Window):
 
         # إدراج أو إزالة
         existing = self.route_temp_data.get(day_key, [])
+        row = list(row)
         if self._doctor_lab_vars[label].get():
-            if row not in existing:
-                self.route_temp_data[day_key].append(row)
+            if row in existing:
+                return  # 🚫 الصف مكرر، لا حاجة لإضافته
+
+            self.route_temp_data[day_key].append(row)
+
         else:
             self.route_temp_data[day_key] = [r for r in existing if r != row]
 
@@ -1922,11 +1926,9 @@ class MedicalTransApp(tb.Window):
                 # 🟢 لا نتحقق من التكرار — نسمح بإضافة أكثر من صف ملاحظات عامة
                 row = ["", "", "", "", "", "__note_only__"]
                 self.route_temp_data[day_key].append(row)
-                print("✅ تم إضافة صف ملاحظات عامة:", row)
             else:
                 row = ["", "", "", "", "", ""]
                 self.route_temp_data[day_key].append(row)
-                print("✅ تم إضافة صف عادي")
 
             popup.destroy()
             self._draw_route_preview()
@@ -2058,9 +2060,7 @@ class MedicalTransApp(tb.Window):
 
     def is_note_row(self, row):
         row = (list(row) + [""] * 6)[:6]
-        print(f"🔎 is_note_row فحص الصف: {repr(row)}")
         result = all(not str(c).strip() for c in row[:5]) and str(row[5]).strip().startswith("__note_only__")
-        print(f"🧪 التحقق النهائي: {repr(row)}, النتيجة: {result}")
         return result
 
     def _make_note_edit_callback(self, row_index):
@@ -2080,20 +2080,9 @@ class MedicalTransApp(tb.Window):
         day_key = day.strftime("%Y-%m-%d")
         rows = self.route_temp_data.get(day_key, [])
 
-        # طباعة جميع الصفوف قبل أي معالجة
-        print("==== محتوى جميع الصفوف قبل المعالجة والرسم ====")
-        for idx, row in enumerate(rows):
-            print(f"{idx}: {repr(row)}")
-
         for i in range(len(rows)):
             rows[i] = (list(rows[i]) + [""] * 6)[:6]
         self.route_temp_data[day_key] = rows
-
-        # طباعة الصفوف بعد التصحيح والتطويل (padding)
-        print("==== محتوى جميع الصفوف بعد التصحيح ====")
-        for idx, row in enumerate(rows):
-            print(f"{idx}: {repr(row)}")
-            print(f"  -> is_note_row: {self.is_note_row(row)}")
 
         weekday_names = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
         weekday_name = weekday_names[day.weekday()]
@@ -2147,8 +2136,6 @@ class MedicalTransApp(tb.Window):
 
         for row_index in range(len(rows)):
             row_data = self.route_temp_data[day_key][row_index]
-            print(f"--> أثناء الرسم: الصف {row_index}: {repr(row_data)}")
-            print(f"    is_note_row: {self.is_note_row(row_data)}")
             self._row_y_positions.append(y)
             if self.is_note_row(row_data):
                 y = self._draw_note_row(canvas, row_index, y)
@@ -2253,7 +2240,11 @@ class MedicalTransApp(tb.Window):
             cell_heights.append(total_height)
 
         row_height = max(cell_heights)
-        y = self._row_y_positions[row_index]
+        row_height = max(row_height, 34)
+        if row_index < len(self._row_y_positions):
+            y = self._row_y_positions[row_index]
+        else:
+            y = start_y
 
         for i in range(len(headers)):
             x = x_positions[i]
@@ -2277,7 +2268,9 @@ class MedicalTransApp(tb.Window):
                     lines.append(current_line)
             line_height = font_obj.metrics("linespace")
             total_height = len(lines) * line_height
-            text_y_offset = (row_height - total_height) // 2
+
+            # ✅ تعديل هنا فقط لضمان padding علوي بسيط (تفادي قص أول سطر)
+            text_y_offset = max((row_height - total_height) // 2, 4)
 
             if i == len(headers) - 1:
                 cell_tag = f"note_cell_{row_index}"
@@ -6907,7 +6900,6 @@ class MedicalTransApp(tb.Window):
                 if weekdays and weekday_times:
                     days = weekdays.strip().splitlines()
                     times = weekday_times.strip().splitlines()
-                    print(f"📆 الطبيب {name} لديه أيام: {days} والتوقيتات: {times}")
                     label_to_key = {
                         "الإثنين": "mon", "الثلاثاء": "tue", "الأربعاء": "wed",
                         "الخميس": "thu", "الجمعة": "fri"
