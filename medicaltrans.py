@@ -2248,7 +2248,8 @@ class MedicalTransApp(tb.Window):
 
         for i in range(len(headers)):
             x = x_positions[i]
-            canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff")
+            cell_tag = f"cell_{row_index}_{i}"
+            canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff", tags=(cell_tag,))
 
             text = str(row_data[i])
             width_limit = col_widths[i] - (30 if i == len(headers) - 1 else 8)
@@ -2269,11 +2270,10 @@ class MedicalTransApp(tb.Window):
             line_height = font_obj.metrics("linespace")
             total_height = len(lines) * line_height
 
-            # ✅ تعديل هنا فقط لضمان padding علوي بسيط (تفادي قص أول سطر)
             text_y_offset = max((row_height - total_height) // 2, 4)
 
             if i == len(headers) - 1:
-                cell_tag = f"note_cell_{row_index}"
+                note_cell_tag = f"note_cell_{row_index}"
                 canvas.create_text(
                     x + 4, y + text_y_offset,
                     anchor="nw",
@@ -2281,7 +2281,7 @@ class MedicalTransApp(tb.Window):
                     font=font_conf,
                     width=col_widths[i] - 30,
                     fill="red",
-                    tags=(cell_tag,)
+                    tags=(note_cell_tag,)
                 )
 
                 icon_y = y + min(6, row_height - 12)
@@ -2290,11 +2290,11 @@ class MedicalTransApp(tb.Window):
                     anchor="ne",
                     text="✏️",
                     font=("Segoe UI", 8),
-                    tags=(cell_tag,)
+                    tags=(note_cell_tag,)
                 )
 
                 canvas.tag_bind(
-                    cell_tag, "<Button-1>",
+                    note_cell_tag, "<Button-1>",
                     lambda e, rx=row_index, xx=x, yy=y, ww=col_widths[i]:
                         self._edit_notes_in_cell(rx, xx, yy, ww)
                 )
@@ -2304,8 +2304,35 @@ class MedicalTransApp(tb.Window):
                     anchor="nw",
                     text=text,
                     font=font_conf,
-                    width=col_widths[i] - 8
+                    width=col_widths[i] - 8,
+                    tags=(cell_tag,)
                 )
+                # الربط للأعمدة الأربعة الأولى فقط
+                if i == 0:
+                    # الطبيب/المخبر
+                    canvas.tag_bind(
+                        cell_tag, "<Button-1>",
+                        lambda e, rx=row_index, xx=x, yy=y: self._show_doctor_selector(rx, xx, yy)
+                    )
+                elif i == 1:
+                    # Zeit
+                    canvas.tag_bind(
+                        cell_tag, "<Button-1>",
+                        lambda e, rx=row_index, xx=x, yy=y: self._show_time_selector(rx, xx, yy)
+                    )
+                elif i == 2:
+                    # المخبر
+                    canvas.tag_bind(
+                        cell_tag, "<Button-1>",
+                        lambda e, rx=row_index, xx=x, yy=y: self._show_lab_selector(rx, xx, yy)
+                    )
+                elif i == 3:
+                    # المواد/الوصف
+                    canvas.tag_bind(
+                        cell_tag, "<Button-1>",
+                        lambda e, rx=row_index, xx=x, yy=y: self._show_material_selector(rx, xx, yy)
+                    )
+
         return row_height
 
     def _draw_note_row(self, canvas, row_index, y):
