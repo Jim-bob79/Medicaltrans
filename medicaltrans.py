@@ -308,6 +308,7 @@ class MedicalTransApp(tb.Window):
         self.main_preview_driver = None
         self.main_preview_days = []
         self.main_preview_index = 0
+        self._selected_route_row_index = None
 
     def _init_database(self):
         with sqlite3.connect("medicaltrans.db") as conn:
@@ -1536,26 +1537,31 @@ class MedicalTransApp(tb.Window):
         import tkinter as tk
         from datetime import datetime, timedelta
 
-        if not hasattr(self, "route_days") or not self.route_days:
-            today = datetime.today()
-            days_ahead = (7 - today.weekday() + 0) % 7
-            next_monday = today + timedelta(days=days_ahead)
-            self.route_days = []
-            for i in range(5):
-                day = next_monday + timedelta(days=i)
-                if not self.is_holiday(day):
-                    self.route_days.append(day)
-            if not self.route_days:
-                self.show_message("warning", "لا توجد أيام متاحة هذا الأسبوع (عطل فقط)")
-                return
-            self.route_temp_data = {}
-            self.route_driver_names = {}
-            self.route_start_hours = {}
-            self.current_route_index = 0
+        # ✅ تحميل أيام الأسبوع وتصفية أيام العطل الرسمية من التقويم
+        today = datetime.today()
+        days_ahead = (7 - today.weekday()) % 7
+        next_monday = today + timedelta(days=days_ahead)
+        self.route_days = []
 
-        win = self.build_centered_popup("➕ إضافة Route جديدة", 1120, 700)
+        for i in range(5):  # من الإثنين إلى الجمعة
+            day = next_monday + timedelta(days=i)
+            if not self.is_holiday(day):  # ✅ استبعاد اليوم إن كان عطلة رسمية
+                self.route_days.append(day)
+
+        if not self.route_days:
+            self.show_message("warning", "لا توجد أيام متاحة هذا الأسبوع (عطل فقط)")
+            return
+
+        # ✅ تهيئة بيانات الأسبوع
+        self.route_temp_data = {}
+        self.route_driver_names = {}
+        self.route_start_hours = {}
+        self.current_route_index = 0
+
+        win = self.build_centered_popup("➕ إضافة Route جديدة", 1250, 800)
         self._route_popup = win
 
+        # ===== العنوان العلوي =====
         top_frame = tb.Frame(win)
         top_frame.pack(fill="x", padx=10, pady=10)
 
@@ -1571,15 +1577,28 @@ class MedicalTransApp(tb.Window):
         route_date_label = ttk.Label(top_frame, text="", width=20)
         route_date_label.grid(row=0, column=3, padx=5)
 
+        # ✅ أزرار التنقل بين الأيام
+        self._route_prev_btn = ttk.Button(top_frame, text="⬅️ السابق", command=self._prev_route_day)
+        self._route_prev_btn.grid(row=0, column=8, padx=5)
+
+        self._route_next_btn = ttk.Button(top_frame, text="التالي ➡️", command=self._next_route_day)
+        self._route_next_btn.grid(row=0, column=9, padx=5)
+
+        # ===== السائق وبداية العمل =====
         ttk.Label(top_frame, text="🚗 السائق:").grid(row=0, column=4, sticky="w", padx=5)
         driver_combo = ttk.Combobox(top_frame, values=self.get_driver_names(), state="readonly", width=20)
         driver_combo.grid(row=0, column=5, padx=5)
 
         ttk.Label(top_frame, text="🕗 بداية العمل:").grid(row=0, column=6, sticky="w", padx=5)
-        start_hour_combo = ttk.Combobox(top_frame, values=[f"{h:02}:{m:02}" for h in range(6, 17) for m in (0, 30)],
-                                    state="readonly", width=10)
+        start_hour_combo = ttk.Combobox(
+            top_frame,
+            values=[f"{h:02}:{m:02}" for h in range(6, 17) for m in (0, 30)],
+            state="readonly",
+            width=10
+        )
         start_hour_combo.grid(row=0, column=7, padx=5)
 
+        # ===== قسم الطبيب / المخبر =====
         doctor_input_frame = tb.LabelFrame(win, text="🏥 إضافة مخبر إلى Route", padding=10)
         doctor_input_frame.pack(fill="x", padx=10, pady=(5, 10))
 
@@ -1587,33 +1606,29 @@ class MedicalTransApp(tb.Window):
         self._doctor_lab_checks_frame.pack(fill="x", pady=(10, 5))
         self._doctor_lab_vars = {}
 
+        # ===== جدول المعاينة =====
         canvas_frame = tb.Frame(win)
         canvas_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        self.route_preview_canvas = tb.Canvas(canvas_frame, bg="white", width=1000, height=400)
+        self.route_preview_canvas = tb.Canvas(canvas_frame, bg="white", width=1100, height=400)
         self.route_preview_canvas.pack(fill="both", expand=True)
 
+        # ===== الأزرار السفلية =====
         button_frame = tb.Frame(win)
         button_frame.pack(fill="x", pady=(10, 10), padx=10)
+
         left_btns = tb.Frame(button_frame)
         left_btns.pack(side="left")
         ttk.Button(left_btns, text="➕ إضافة صف يدوي", command=self._add_manual_route_row).pack(side="left", padx=5)
         ttk.Button(left_btns, text="🔁 إعادة تحميل اليوم", command=self._reload_route_day_data).pack(side="left", padx=5)
         ttk.Button(left_btns, text="⬆️ للأعلى", command=self._move_route_row_up).pack(side="left", padx=5)
         ttk.Button(left_btns, text="⬇️ للأسفل", command=self._move_route_row_down).pack(side="left", padx=5)
+        ttk.Button(left_btns, text="🗑 حذف الصف المحدد", command=self._delete_selected_route_row).pack(side="left", padx=5)
 
         right_btns = tb.Frame(button_frame)
         right_btns.pack(side="right")
-        
-        # زر تطبيق
         ttk.Button(right_btns, text="💾 تطبيق", command=lambda: self._save_full_route(apply_only=True)).pack(side="left", padx=5)
-
-        # زر حفظ
         ttk.Button(right_btns, text="💾 حفظ", command=self._save_full_route).pack(side="left", padx=5)
-
-        # زر إغلاق
         ttk.Button(right_btns, text="❌ إغلاق", command=self._confirm_close_route_popup).pack(side="left", padx=5)
-
-        # زر طباعة
         ttk.Button(right_btns, text="🖨️ طباعة", command=self._print_route_pdf).pack(side="left", padx=5)
 
         self._route_inputs = {
@@ -1625,10 +1640,11 @@ class MedicalTransApp(tb.Window):
             "start_hour_combo": start_hour_combo
         }
 
-        should_autoload = not getattr(self, "_suppress_autoload", False)
-        if should_autoload:
+        # ✅ تحميل بيانات اليوم الحالي
+        if not getattr(self, "_suppress_autoload", False):
             self._load_route_day()
 
+        # ✅ حفظ وقت السائق عند تغييره
         def update_driver_and_time(*_):
             if self.route_days:
                 day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
@@ -1640,6 +1656,7 @@ class MedicalTransApp(tb.Window):
         start_hour_combo.bind("<<ComboboxSelected>>", update_driver_and_time)
         driver_combo.bind("<FocusOut>", update_driver_and_time)
         start_hour_combo.bind("<FocusOut>", update_driver_and_time)
+
         win.protocol("WM_DELETE_WINDOW", self._confirm_close_route_popup)
 
     def _confirm_close_route_popup(self):
@@ -1870,21 +1887,19 @@ class MedicalTransApp(tb.Window):
     def _next_route_day(self):
         if self.current_route_index + 1 < len(self.route_days):
             self.current_route_index += 1
-            self._route_save_btn.pack_forget()
+            self._route_prev_btn["state"] = "normal"
+            if self.current_route_index + 1 == len(self.route_days):
+                self._route_next_btn["state"] = "disabled"
+                self.show_message("info", "🗓️ هذا هو آخر يوم في الأسبوع. يمكنك الآن مراجعة وإدخال البيانات أو حفظ Route.")
             self._load_route_day()
-        else:
-            self._route_next_btn.pack_forget()
-            self._route_save_btn.pack(side="right", padx=10)
-            self.show_message("info", "✅ تم إدخال جميع الأيام، يمكنك الآن حفظ Route")
 
     def _prev_route_day(self):
-        if self.current_route_index == 0:
-            return  # لا يمكن الرجوع قبل الإثنين
-
-        self.current_route_index -= 1
-        self._route_next_btn.pack(side="left", padx=5)
-        self._route_save_btn.pack_forget()
-        self._load_route_day()
+        if self.current_route_index > 0:
+            self.current_route_index -= 1
+            self._route_next_btn["state"] = "normal"
+            if self.current_route_index == 0:
+                self._route_prev_btn["state"] = "disabled"
+            self._load_route_day()
 
     def _add_manual_route_row(self):
         import tkinter as tk
@@ -2032,14 +2047,13 @@ class MedicalTransApp(tb.Window):
         day_key = current_date.strftime("%Y-%m-%d")
         rows = self.route_temp_data.get(day_key, [])
 
-        if len(rows) < 2:
+        idx = getattr(self, "_selected_route_row_index", None)
+        if idx is None or idx <= 0 or idx >= len(rows):
             return
 
-        # انقل آخر صف يدويًا للأعلى
-        for i in range(1, len(rows)):
-            if any(rows[i]):
-                rows[i - 1], rows[i] = rows[i], rows[i - 1]
-                break
+        # تبادل الصف المحدد مع الصف الذي قبله
+        rows[idx - 1], rows[idx] = rows[idx], rows[idx - 1]
+        self._selected_route_row_index -= 1  # تحديث المؤشر للصف الجديد
 
         self._draw_route_preview()
 
@@ -2048,15 +2062,36 @@ class MedicalTransApp(tb.Window):
         day_key = current_date.strftime("%Y-%m-%d")
         rows = self.route_temp_data.get(day_key, [])
 
-        if len(rows) < 2:
+        idx = getattr(self, "_selected_route_row_index", None)
+        if idx is None or idx >= len(rows) - 1:
             return
 
-        for i in range(len(rows) - 1):
-            if any(rows[i]):
-                rows[i + 1], rows[i] = rows[i], rows[i + 1]
-                break
+        # تبادل الصف المحدد مع الصف التالي
+        rows[idx + 1], rows[idx] = rows[idx], rows[idx + 1]
+        self._selected_route_row_index += 1  # تحديث المؤشر للصف الجديد
 
         self._draw_route_preview()
+
+    def _delete_selected_route_row(self):
+        current_date = self.route_days[self.current_route_index]
+        day_key = current_date.strftime("%Y-%m-%d")
+        rows = self.route_temp_data.get(day_key, [])
+
+        idx = getattr(self, "_selected_route_row_index", None)
+        if idx is None or not (0 <= idx < len(rows)):
+            return
+
+        # ✅ إضافة رسالة تأكيد مخصصة
+        def do_delete():
+            del rows[idx]
+            self._selected_route_row_index = None
+            self._draw_route_preview()
+
+        self.show_message(
+            kind="confirm",
+            message="⚠️ هل أنت متأكد أنك تريد حذف هذا الصف؟",
+            confirm_callback=do_delete
+        )
 
     def is_note_row(self, row):
         row = (list(row) + [""] * 6)[:6]
@@ -2092,26 +2127,27 @@ class MedicalTransApp(tb.Window):
         start_hour = self._route_inputs["start_hour_combo"].get().strip()
 
         headers = ["الطبيب / المخبر", "Zeit", "المخبر", "Beschreibung", "العنوان", "ملاحظات/مواد"]
-        column_ratios = [1.4, 1.2, 0.8, 1.4, 2, 2.6]
+        column_ratios = [1.5, 1.2, 0.9, 1.5, 2, 2.6]
         total_ratio = sum(column_ratios)
 
         canvas.update_idletasks()
-        canvas_width = canvas.winfo_width() or 1000
+        canvas_width = 1200
         col_widths = [int(canvas_width * (r / total_ratio)) for r in column_ratios]
 
-        x_positions = [0]
+        x_positions = [30]  # ← مساحة مخصصة لزر التحديد خارج الأعمدة
         for w in col_widths[:-1]:
             x_positions.append(x_positions[-1] + w)
 
-        total_width = sum(col_widths)
+        total_width = sum(col_widths) + 30
         default_row_height = 30
         y = 20
 
         canvas.create_text(10, y, anchor="nw", text=f"🕗 بداية العمل: {start_hour}", font=("Segoe UI", 10, "bold"))
-        canvas.create_text(total_width // 2, y, anchor="n", text=f"🗕️ التاريخ: {readable_date}", font=("Segoe UI", 10, "bold"))
-        canvas.create_text(total_width - 10, y, anchor="ne", text=f"🚗 {driver}", font=("Segoe UI", 10, "bold"))
+        canvas.create_text(total_width // 2, y, anchor="n", text=f"📅 التاريخ: {readable_date}", font=("Segoe UI", 10, "bold"))
+        canvas.create_text(total_width - 10, y, anchor="ne", text=f"🚗 السائق: {driver}", font=("Segoe UI", 10, "bold"))
         y += 30
 
+        canvas.create_text(15, y + default_row_height // 2, anchor="center", text="📍", font=("Segoe UI", 10, "bold"))
         for i, header in enumerate(headers):
             x = x_positions[i]
             canvas.create_rectangle(x, y, x + col_widths[i], y + default_row_height, fill="#dddddd")
@@ -2130,30 +2166,133 @@ class MedicalTransApp(tb.Window):
         self._start_table_y = y
         self._row_y_positions = []
 
-        note_only_ranges = []
-
-        self._row_y_positions = []
-
         for row_index in range(len(rows)):
             row_data = self.route_temp_data[day_key][row_index]
             self._row_y_positions.append(y)
+
+            if self.is_note_row(row_data):
+                line_height = self._font_obj.metrics("linespace")
+                note_text = row_data[5].replace("__note_only__", "").lstrip()
+                note_lines = note_text.split("\n") if note_text.strip() else [""]
+                row_height = max(line_height, len(note_lines) * line_height) + 18
+            else:
+                cell_heights = []
+                for i in range(len(self._col_widths)):
+                    text = str(row_data[i])
+                    width_limit = max(self._col_widths[i] - 8, 30)
+                    words = text.split()
+                    lines = []
+                    current_line = ""
+                    for word in words:
+                        test_line = current_line + " " + word if current_line else word
+                        if self._font_obj.measure(test_line) <= width_limit:
+                            current_line = test_line
+                        else:
+                            lines.append(current_line)
+                            current_line = word
+                    if current_line:
+                        lines.append(current_line)
+                    est_height = len(lines) * self._font_obj.metrics("linespace") + 8
+                    cell_heights.append(est_height)
+                row_height = max(cell_heights)
+                row_height = max(row_height, 34)
+
+            # 🟡 رسم خلفية الصف المحدد
+            if getattr(self, "_selected_route_row_index", None) == row_index:
+                canvas.create_rectangle(
+                    0, y, sum(self._col_widths) + 30, y + row_height,
+                    fill="#eeeeee", outline=""
+                )
+
+            # ثم نرسم محتوى الصف بعد الخلفية
             if self.is_note_row(row_data):
                 y = self._draw_note_row(canvas, row_index, y)
-                # لا ترسم خطوط الأعمدة هنا
             else:
                 row_height = self._draw_route_row(
-                    canvas, row_index,
-                    self._x_positions, self._col_widths,
+                    canvas, row_index, self._x_positions, self._col_widths,
                     self._font_obj, self._font_conf, y
                 )
-                # هنا فقط ارسم خطوط الأعمدة لهذا الصف
+                icon = "✅" if getattr(self, "_selected_route_row_index", None) == row_index else "🔘"
+                canvas.create_text(15, y + row_height // 2, anchor="center", text=icon, font=("Segoe UI", 11, "bold"))
+
                 for x in self._x_positions:
                     canvas.create_line(x, y, x, y + row_height, fill="#000000")
                 y += row_height
 
-        # بعد الحلقة، ارسم الخط الأفقي السفلي فقط
         canvas.create_line(0, y, total_width, y, fill="#000000")
         canvas.config(scrollregion=(0, 0, total_width, y + 20))
+        # canvas.config(width=min(total_width, 1250))
+        canvas.config(xscrollincrement=1)
+
+        def on_canvas_click(event):
+            ex, ey = event.x, event.y
+
+            for row_index, y_top in enumerate(self._row_y_positions):
+                row_data = list(self.route_temp_data[self.route_days[self.current_route_index].strftime("%Y-%m-%d")][row_index])
+
+                if hasattr(self, "is_note_row") and self.is_note_row(row_data):
+                    # صف ملاحظة عامة
+                    line_height = self._font_obj.metrics("linespace")
+                    text = row_data[5].replace("__note_only__", "").lstrip()
+                    lines = text.split("\n") if text.strip() else [""]
+                    row_height = max(line_height, len(lines) * line_height) + 18
+
+                    # ✅ السماح بالتحديد فقط من العمود الأيسر
+                    if y_top <= ey <= y_top + row_height and 0 <= ex <= 30:
+                        if getattr(self, "_selected_route_row_index", None) == row_index:
+                            self._selected_route_row_index = None
+                        else:
+                            self._selected_route_row_index = row_index
+                        self._draw_route_preview()
+                        return
+
+                    continue  # لا ننفذ أي شيء آخر على صف الملاحظات
+
+                else:
+                    # صف عادي
+                    cell_heights = []
+                    for i in range(len(self._col_widths)):
+                        text = str(row_data[i])
+                        width_limit = max(self._col_widths[i] - 8, 30)
+                        words = text.split()
+                        lines = []
+                        current_line = ""
+                        for word in words:
+                            test_line = current_line + " " + word if current_line else word
+                            if self._font_obj.measure(test_line) <= width_limit:
+                                current_line = test_line
+                            else:
+                                lines.append(current_line)
+                                current_line = word
+                        if current_line:
+                            lines.append(current_line)
+                        est_height = len(lines) * self._font_obj.metrics("linespace") + 8
+                        cell_heights.append(est_height)
+                    row_height = max(cell_heights)
+
+                if y_top <= ey <= y_top + row_height:
+                    if 0 <= ex <= 30:
+                        # ✅ عمود التحديد
+                        if getattr(self, "_selected_route_row_index", None) == row_index:
+                            self._selected_route_row_index = None
+                        else:
+                            self._selected_route_row_index = row_index
+                        self._draw_route_preview()
+                        return
+
+                    # ✅ باقي الأعمدة
+                    x_positions = self._x_positions
+                    if x_positions[0] <= ex <= x_positions[1]:
+                        self._show_doctor_selector(row_index, x_positions[0], y_top)
+                    elif x_positions[1] <= ex <= x_positions[2]:
+                        self._show_time_selector(row_index, x_positions[1], y_top)
+                    elif x_positions[2] <= ex <= x_positions[3]:
+                        self._show_lab_selector(row_index, x_positions[2], y_top)
+                    elif x_positions[3] <= ex <= x_positions[4]:
+                        self._show_material_selector(row_index, x_positions[3], y_top)
+                    return
+
+        canvas.bind("<Button-1>", on_canvas_click)
 
     def _edit_note_only_row(self, row_index):
         import tkinter as tk
@@ -2221,7 +2360,7 @@ class MedicalTransApp(tb.Window):
         cell_heights = []
         for i in range(len(headers)):
             text = str(row_data[i])
-            width_limit = col_widths[i] - 8
+            width_limit = max(col_widths[i] - (30 if i == len(headers) - 1 else 8), 30)
             lines = []
             for raw_line in text.split("\n"):
                 words = raw_line.split()
@@ -2252,7 +2391,7 @@ class MedicalTransApp(tb.Window):
             canvas.create_rectangle(x, y, x + col_widths[i], y + row_height, fill="#ffffff", tags=(cell_tag,))
 
             text = str(row_data[i])
-            width_limit = col_widths[i] - (30 if i == len(headers) - 1 else 8)
+            width_limit = max(col_widths[i] - (30 if i == len(headers) - 1 else 8), 30)
 
             lines = []
             for raw_line in text.split("\n"):
@@ -2279,19 +2418,21 @@ class MedicalTransApp(tb.Window):
                     anchor="nw",
                     text=text,
                     font=font_conf,
-                    width=col_widths[i] - 30,
+                    width=max(col_widths[i] - 36, 20),
+                    justify="right",
                     fill="red",
                     tags=(note_cell_tag,)
                 )
-
-                icon_y = y + min(6, row_height - 12)
-                canvas.create_text(
-                    x + col_widths[i] - 14, icon_y,
-                    anchor="ne",
-                    text="✏️",
-                    font=("Segoe UI", 8),
-                    tags=(note_cell_tag,)
-                )
+        
+                if col_widths[i] >= 40:
+                    icon_y = y + row_height // 2
+                    canvas.create_text(
+                        x + col_widths[i] - 4, icon_y,
+                        anchor="e",
+                        text="✏️",
+                        font=("Segoe UI", 12, "bold"),
+                        tags=(note_cell_tag,)
+                    )
 
                 canvas.tag_bind(
                     note_cell_tag, "<Button-1>",
@@ -2305,34 +2446,30 @@ class MedicalTransApp(tb.Window):
                     text=text,
                     font=font_conf,
                     width=col_widths[i] - 8,
+                    justify="right",
                     tags=(cell_tag,)
                 )
-                # الربط للأعمدة الأربعة الأولى فقط
                 if i == 0:
-                    # الطبيب/المخبر
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
                         lambda e, rx=row_index, xx=x, yy=y: self._show_doctor_selector(rx, xx, yy)
                     )
                 elif i == 1:
-                    # Zeit
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
                         lambda e, rx=row_index, xx=x, yy=y: self._show_time_selector(rx, xx, yy)
                     )
                 elif i == 2:
-                    # المخبر
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
                         lambda e, rx=row_index, xx=x, yy=y: self._show_lab_selector(rx, xx, yy)
                     )
                 elif i == 3:
-                    # المواد/الوصف
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
                         lambda e, rx=row_index, xx=x, yy=y: self._show_material_selector(rx, xx, yy)
                     )
-
+    
         return row_height
 
     def _draw_note_row(self, canvas, row_index, y):
@@ -2342,7 +2479,7 @@ class MedicalTransApp(tb.Window):
 
         font_conf = self._font_conf
         font_obj = self._font_obj
-        total_width = sum(self._col_widths)
+        total_width = sum(self._col_widths) + 30  # نضيف مساحة العمود الأول الخاص بأيقونة التحديد
 
         # ضمان وجود __note_only__
         if not str(row_data[5]).startswith("__note_only__"):
@@ -2350,38 +2487,44 @@ class MedicalTransApp(tb.Window):
             self.route_temp_data[day_key][row_index] = ["", "", "", "", "", row_data[5]]
 
         text_content = row_data[5].replace("__note_only__", "").lstrip()
-        # عالج النص الفارغ ليظهر سطر واحد على الأقل
         lines = text_content.split("\n") if text_content.strip() else [""]
 
         line_height = font_obj.metrics("linespace")
-        padding = 18  # إجمالي البادينغ (يوزع بين الأعلى والأسفل)
+        padding = 18
         row_height = max(line_height, len(lines) * line_height) + padding
 
         note_tag = f"note_cell_{row_index}"
 
         # ارسم المستطيل للصف بالكامل
-        canvas.create_rectangle(0, y, total_width, y + row_height, fill="#ffffff", tags=(note_tag,))
+        canvas.create_rectangle(30, y, total_width, y + row_height, fill="#ffffff", tags=(note_tag,))
 
-        # ابدأ النص من منتصف البادينغ الأعلى
+        # ✅ زر التحديد في أقصى اليسار (خارج الجدول)
+        x0 = 15  # مسافة اليسار
+        icon = "✅" if getattr(self, "_selected_route_row_index", None) == row_index else "🔘"
+        canvas.create_text(x0, y + row_height // 2, anchor="center", text=icon, font=("Segoe UI", 11))
+
+        # 📝 نص الملاحظة
         text_start_y = y + (padding // 2)
-
         canvas.create_text(
-            10, text_start_y,
+            30, text_start_y,
             anchor="nw",
             text=text_content,
             font=font_conf,
-            width=total_width - 40,
+            width=total_width - 60,
+            justify="right",
             fill="black",
             tags=(note_tag,)
         )
-        # أيقونة التحرير بنفس محاذاة النص
+
+        # ✏️ أيقونة التحرير
         canvas.create_text(
-            total_width - 14, text_start_y,
+            total_width - 20, text_start_y,
             anchor="ne",
             text="✏️",
             font=("Segoe UI", 8),
             tags=(note_tag,)
         )
+
         canvas.tag_bind(note_tag, "<Button-1>", self._make_note_edit_callback(row_index))
 
         return y + row_height
@@ -2406,7 +2549,7 @@ class MedicalTransApp(tb.Window):
         frame = tk.Frame(popup)
         frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        text_area = tk.Text(frame, font=("Segoe UI", 9), wrap="word")
+        text_area = tk.Text(frame, font=("Segoe UI", 9), wrap="char")
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text_area.yview)
         text_area.configure(yscrollcommand=scrollbar.set)
 
@@ -2511,7 +2654,7 @@ class MedicalTransApp(tb.Window):
                 del self._active_doctor_window_id
                 self._draw_route_preview()
 
-        canvas.bind("<Button-1>", close_on_click_outside, add="+")
+        # canvas.bind("<Button-1>", close_on_click_outside, add="+")
 
         def on_select(event=None):
             selected = listbox.get("anchor").strip()
@@ -2583,7 +2726,6 @@ class MedicalTransApp(tb.Window):
         selected_time_from = tk.StringVar(value=time_values[0] if time_values else "")
         selected_time_to = tk.StringVar(value=time_values[1] if len(time_values) > 1 else "")
 
-        # عناصر الإدخال في إطار علوي
         input_frame = tk.Frame(frame, bg="white")
         input_frame.pack(fill="both", expand=True)
 
@@ -2609,14 +2751,11 @@ class MedicalTransApp(tb.Window):
         selected_option.trace_add("write", update_ui)
         update_ui()
 
-        # زر تأكيد في الأسفل
         button_frame = tk.Frame(frame, bg="white")
         button_frame.pack(fill="x", pady=4)
 
         def apply_time():
             prefix = selected_option.get()
-
-            # استخدام النافذة العليا بشكل مضمون
             parent_window = canvas.winfo_toplevel()
 
             if prefix == "von - bis":
@@ -2626,21 +2765,12 @@ class MedicalTransApp(tb.Window):
                     h1, m1 = map(int, t1.split(":"))
                     h2, m2 = map(int, t2.split(":"))
                     if (h2, m2) <= (h1, m1):
-                        self.route_preview_canvas.update_idletasks()  # لتأكيد تحديث السياق
-                        messagebox.showerror(
-                            "خطأ في الوقت",
-                            "يجب أن يكون bis بعد von.",
-                            parent=parent_window
-                        )
+                        self.route_preview_canvas.update_idletasks()
+                        messagebox.showerror("خطأ في الوقت", "يجب أن يكون bis بعد von.", parent=parent_window)
                         return
                 except:
-                    messagebox.showerror(
-                        "خطأ في التنسيق",
-                        "صيغة الوقت غير صحيحة.",
-                        parent=parent_window
-                    )
+                    messagebox.showerror("خطأ في التنسيق", "صيغة الوقت غير صحيحة.", parent=parent_window)
                     return
-
                 suffix = f"{t1} - {t2}"
             elif prefix == "nach Anruf":
                 doctor_name = self.route_temp_data[day_key][row_index][0].strip()
@@ -2649,21 +2779,27 @@ class MedicalTransApp(tb.Window):
                 suffix = f"nach Anruf 📞 {phone}" if phone else "nach Anruf"
             elif prefix in ("bis", "ab"):
                 suffix = selected_time_from.get()
-            else:        
+            else:
                 suffix = ""
 
             value = f"{prefix} {suffix}".strip()
             current_row = list(self.route_temp_data[day_key][row_index])
             current_row[1] = value
             self.route_temp_data[day_key][row_index] = tuple(current_row)
+
+            # ✅ إعادة الترتيب حسب الوقت
             self.route_temp_data[day_key].sort(key=lambda row: self._extract_sort_time(row[1]))
+
+            # ✅ إلغاء التحديد اليدوي
+            self._selected_route_row_index = None
+
+            # إغلاق نافذة الوقت وإعادة رسم الجدول
             canvas.delete(window_id)
             del self._active_time_selector
             del self._active_time_window_id
             self._draw_route_preview()
 
-        btn = tk.Button(button_frame, text="✔️ تم", command=apply_time, bg="white")
-        btn.pack()
+        tk.Button(button_frame, text="✔️ تم", command=apply_time, bg="white").pack()
 
         def close_if_click_outside(event):
             if hasattr(self, "_active_time_window_id"):
@@ -2675,8 +2811,6 @@ class MedicalTransApp(tb.Window):
                         del self._active_time_selector
                         del self._active_time_window_id
                         self._draw_route_preview()
-
-        canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
     def _extract_sort_time(self, time_str):
         import re
@@ -2771,7 +2905,7 @@ class MedicalTransApp(tb.Window):
                         del self._active_lab_window_id
                         self._draw_route_preview()
 
-        canvas.bind("<Button-1>", close_if_click_outside, add="+")
+        # canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
         self._active_lab_selector = frame
         self._active_lab_window_id = window_id
@@ -2839,7 +2973,7 @@ class MedicalTransApp(tb.Window):
                         del self._active_material_window_id
                         self._draw_route_preview()
 
-        canvas.bind("<Button-1>", close_if_click_outside, add="+")
+        # canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
     def get_all_doctor_names(self):
         import sqlite3
@@ -3037,7 +3171,12 @@ class MedicalTransApp(tb.Window):
                 formatted_row = []
                 for i, cell in enumerate(row):
                     style = red_style if i == 5 else wrapped_style
-                    cell = str(cell).replace("\n", "<br/>")
+
+                    cell = str(cell)
+                    if i == 5 and cell.startswith("__note_only__"):
+                        cell = cell.replace("__note_only__", "").lstrip()
+
+                    cell = cell.replace("\n", "<br/>")
                     if not cell.strip():
                         cell = "&nbsp;"
                     para = Paragraph(cell, style)
@@ -3084,7 +3223,7 @@ class MedicalTransApp(tb.Window):
                 ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
                 ("BACKGROUND", (0, 1), (-1, -1), colors.white),
                 ("ALIGN", (0, 1), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 1), (-1, -1), "TOP"),
+                ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 1, colors.black),
             ])
             t.setStyle(style)
@@ -6872,13 +7011,29 @@ class MedicalTransApp(tb.Window):
                 c = conn.cursor()
                 c.execute("""
                     SELECT 1 FROM calendar_events
-                    WHERE title = 'عطلة رسمية'
-                    AND date(?) BETWEEN start_date AND end_date
+                    WHERE ? BETWEEN start_date AND end_date
                 """, (date_str,))
                 return c.fetchone() is not None
         except Exception as e:
             print("خطأ التحقق من العطلة:", e)
             return False
+
+    def _load_holidays_if_needed(self):
+        if hasattr(self, "_holidays") and self._holidays:
+            return
+        self._holidays = set()
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("SELECT start_date, end_date FROM calendar_events")
+            for start, end in c.fetchall():
+                try:
+                    start_date = datetime.strptime(start, "%Y-%m-%d").date()
+                    end_date = datetime.strptime(end, "%Y-%m-%d").date()
+                    while start_date <= end_date:
+                        self._holidays.add(start_date)
+                        start_date += timedelta(days=1)
+                except:
+                    continue
 
     def get_doctor_names(self):
         import sqlite3
