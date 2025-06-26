@@ -1407,11 +1407,23 @@ class MedicalTransApp(tb.Window):
         left_frame = tb.Frame(frame)
         left_frame.pack(side="left", fill="y", padx=(10, 5), pady=10)
 
-        # أزرار الإضافة والتعديل
+        # أزرار الإضافة والحذف (بدلاً من التعديل)
         btns_frame = tb.Frame(left_frame)
         btns_frame.pack(fill="x", pady=(0, 10))
-        ttk.Button(btns_frame, text="➕ إضافة Route", style="Accent.TButton", command=self._add_route_popup).pack(side="left", padx=5)
-        ttk.Button(btns_frame, text="✏️ تعديل Route", command=self._edit_route_popup).pack(side="left", padx=5)
+        ttk.Button(
+            btns_frame, 
+            text="➕ إضافة Route", 
+            style="Accent.TButton", 
+            command=self._add_route_popup
+        ).pack(side="left", padx=5)
+        self.delete_route_btn = ttk.Button(
+            btns_frame, 
+            text="🗑 حذف Route", 
+            style="danger.TButton", 
+            command=self._delete_route,
+            state="disabled"  # الزر معطل افتراضياً عند بدء البرنامج
+        )
+        self.delete_route_btn.pack(side="left", padx=5)
 
         # === إطار تمرير لعرض البطاقات ===
         cards_container = tb.Frame(left_frame)
@@ -1485,18 +1497,14 @@ class MedicalTransApp(tb.Window):
             else:
                 card.config(bg="white", highlightthickness=0)
 
-        # 2. تفعيل زر "إضافة/تعديل Route" ليعمل كزر تعديل
-        if hasattr(self, "add_edit_route_btn"):
-            self.add_edit_route_btn.config(state="normal", text="تعديل Route")  # أو "إضافة/تعديل Route"
-
-        # 3. تفعيل زر الحذف
+        # 2. تفعيل زر الحذف عند التحديد
         if hasattr(self, "delete_route_btn"):
             self.delete_route_btn.config(state="normal")
-
-        # 4. عرض تفاصيل البطاقة في إطار العرض الجانبي (للقراءة فقط)
+    
+        # 3. عرض تفاصيل البطاقة في إطار العرض الجانبي (للقراءة فقط)
         self._display_route_details(route_id)
 
-        # 5. (اختياري) إذا كانت نافذة إضافة/تعديل مفتوحة أغلقها
+        # 4. (اختياري) إذا كانت نافذة منبثقة مفتوحة أغلقها
         if hasattr(self, "_route_popup") and self._route_popup.winfo_exists():
             self._route_popup.destroy()
 
@@ -1527,6 +1535,48 @@ class MedicalTransApp(tb.Window):
 
         # إذا كنت تعرض جدول المهام (route_tasks)، كرر نفس فكرة الجلب والعرض
         # ... (يمكنك هنا إضافة المزيد حسب الحاجة)
+
+    def _delete_route(self):
+        route_id = getattr(self, "selected_route_id", None)
+        if not route_id:
+            self.show_message("warning", "يرجى تحديد Route أولاً قبل الحذف.")
+            return
+
+        # رسالة تأكيد
+        if not self.show_custom_confirm("تأكيد الحذف", ⚠️ هل تريد حذف هذا الـ Route نهائيًا؟"):
+            return
+
+        try:
+            import sqlite3
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+
+            # حذف من جدول route_tasks أولًا
+            c.execute("SELECT name, date, driver FROM routes WHERE id = ?", (route_id,))
+            row = c.fetchone()
+            if row:
+                route_name, date, driver = row
+                c.execute("DELETE FROM route_tasks WHERE route_name = ? AND date = ? AND driver = ?", (route_name, date, driver))
+            # حذف الـ Route نفسه
+            c.execute("DELETE FROM routes WHERE id = ?", (route_id,))
+            conn.commit()
+            conn.close()
+
+            # تحديث الواجهة بعد الحذف
+            self.selected_route_id = None
+            self._refresh_route_cards()
+            if hasattr(self, "delete_route_btn"):
+                self.delete_route_btn.config(state="disabled")
+            if hasattr(self, "route_details_name_label"):
+                self.route_details_name_label.config(text="")
+            if hasattr(self, "route_details_date_label"):
+                self.route_details_date_label.config(text="")
+            if hasattr(self, "route_details_driver_label"):
+                self.route_details_driver_label.config(text="")
+            self.show_message("success", "✅ تم حذف الـ Route بنجاح.")
+
+        except Exception as e:
+            self.show_message("error", f"حدث خطأ أثناء الحذف:\n{e}")
 
     def _edit_route_popup(self, route_id):
         import sqlite3
