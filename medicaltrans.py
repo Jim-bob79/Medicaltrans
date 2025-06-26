@@ -1586,7 +1586,8 @@ class MedicalTransApp(tb.Window):
 
         # ===== السائق وبداية العمل =====
         ttk.Label(top_frame, text="🚗 السائق:").grid(row=0, column=4, sticky="w", padx=5)
-        driver_combo = ttk.Combobox(top_frame, values=self.get_driver_names(), state="readonly", width=20)
+        current_route_day = self.route_days[0]  # لأننا نبدأ دائمًا من اليوم الأول في الأسبوع
+        driver_combo = ttk.Combobox(top_frame, values=self.get_driver_names(current_route_day), state="readonly", width=20)
         driver_combo.grid(row=0, column=5, padx=5)
 
         ttk.Label(top_frame, text="🕗 بداية العمل:").grid(row=0, column=6, sticky="w", padx=5)
@@ -1647,7 +1648,10 @@ class MedicalTransApp(tb.Window):
         # ✅ حفظ وقت السائق عند تغييره
         def update_driver_and_time(*_):
             if self.route_days:
-                day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
+                day = self.route_days[self.current_route_index]
+                day_key = day.strftime("%Y-%m-%d")
+
+                self._route_inputs["driver_combo"]["values"] = self.get_driver_names(day)
                 self.route_driver_names[day_key] = driver_combo.get().strip()
                 self.route_start_hours[day_key] = start_hour_combo.get().strip()
                 self._draw_route_preview()
@@ -1701,7 +1705,27 @@ class MedicalTransApp(tb.Window):
 
         weekday_key = ["mon", "tue", "wed", "thu", "fri"][current_date.weekday()]
 
-        # جلب بيانات الأطباء
+        # ✅ تحديث قائمة السائقين حسب اليوم الحالي
+        self._route_inputs["driver_combo"]["values"] = self.get_driver_names(current_date)
+
+        # ✅ التحقق من إجازة السائق الحالي
+        driver_name = self._route_inputs["driver_combo"].get()
+
+        def continue_with_driver():
+            self._route_inputs["driver_combo"].set(driver_name)
+            self._draw_route_preview()
+
+        if self.is_on_vacation(driver_name, current_date, "سائق"):
+            self.show_message(
+                "confirm",
+                f"السائق '{driver_name}' في إجازة يوم {weekday_name} ({readable_date}).\n"
+                f"هل ترغب في متابعة هذا اليوم بنفس السائق؟",
+                parent=self._route_popup,
+                confirm_callback=continue_with_driver
+            )
+            self._route_inputs["driver_combo"].set("")
+
+        # ✅ جلب بيانات الأطباء
         doctors = self.get_doctors_by_weekday(weekday_key, current_date)
         new_rows = []
         for doctor in doctors:
@@ -1715,28 +1739,23 @@ class MedicalTransApp(tb.Window):
             )
             new_rows.append(row)
 
-        # حفظ البيانات المؤقتة
+        # ✅ حفظ البيانات المؤقتة
         day_key = current_date.strftime("%Y-%m-%d")
         self.route_temp_data[day_key] = new_rows
 
-        # تحديث المعاينة
+        # ✅ تحديث المعاينة
         self._draw_route_preview()
 
-        # ✅ جلب الأطباء المتاحين لليوم (يتضمن التحقق من الإجازات تلقائيًا)
+        # ✅ إعداد قائمة اختيار الأطباء والمخابر
         available_doctors = self.get_doctors_by_weekday(weekday_key, current_date)
-
-        # ✅ جلب المخابر
         all_labs = self.get_all_lab_names()
 
-        # ✅ دمج الأطباء والمخابر في قائمة واحدة
-        doctor_lab_items = []
+        doctor_lab_items = [f"🧪 {lab}" for lab in all_labs]
+        self._available_doctors_today = {
+            f"{doc['name']} 🔗 {doc['lab'].replace(chr(10), ' / ').strip()}": doc
+            for doc in available_doctors
+        }
 
-        for lab in all_labs:
-            doctor_lab_items.append(f"🧪 {lab}")
-
-        self._available_doctors_today = {f"{doc['name']} 🔗 {doc['lab'].replace(chr(10), ' / ').strip()}": doc for doc in available_doctors}
-
-        # ✅ إعداد قائمة الفحص الذكية
         self._doctor_lab_vars.clear()
         for widget in self._doctor_lab_checks_frame.winfo_children():
             widget.destroy()
@@ -1747,19 +1766,6 @@ class MedicalTransApp(tb.Window):
             self._doctor_lab_vars[label] = var
 
         self._update_doctor_checkbuttons("")
-
-        # داخل _load_route_day()
-        driver_name = self._route_inputs["driver_combo"].get()
-        target_date = current_date
-
-        if self.is_on_vacation(driver_name, target_date, "سائق"):
-            answer = messagebox.askyesno(
-                "🚫 السائق في إجازة",
-                f"السائق '{driver_name}' في إجازة يوم {weekday_name} ({readable_date}).\n"
-                f"هل ترغب في متابعة هذا اليوم بنفس السائق؟"
-            )
-            if not answer:
-                self._route_inputs["driver_combo"].set("")  # تفريغ السائق
 
     def _on_doctor_lab_toggle(self, label):
         day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
@@ -2521,7 +2527,7 @@ class MedicalTransApp(tb.Window):
             total_width - 20, text_start_y,
             anchor="ne",
             text="✏️",
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 12, "bold"),
             tags=(note_tag,)
         )
 
@@ -7042,7 +7048,15 @@ class MedicalTransApp(tb.Window):
             c.execute("SELECT name FROM doctors ORDER BY name")
             return [row[0] for row in c.fetchall()]
 
-    def get_driver_names(self):
+    def get_driver_names(self, date_obj=None):
+        import sqlite3
+        from datetime import datetime
+
+        if date_obj is None:
+            date_obj = datetime.today()
+
+        date_str = date_obj.strftime("%Y-%m-%d")
+
         with sqlite3.connect("medicaltrans.db") as conn:
             c = conn.cursor()
             c.execute("""
@@ -7053,7 +7067,20 @@ class MedicalTransApp(tb.Window):
                        OR date(employment_end_date) >= date('now'))
                 ORDER BY name ASC
             """)
-            return [row[0] for row in c.fetchall()]
+
+            drivers = []
+            for (name,) in c.fetchall():
+                # ✅ التحقق من الإجازة بناءً على التاريخ المحدد
+                c.execute("""
+                    SELECT 1 FROM vacations
+                    WHERE person_type = 'سائق'
+                    AND name = ?
+                    AND ? BETWEEN start_date AND end_date
+                """, (name, date_str))
+                if not c.fetchone():  # فقط من ليس في إجازة
+                    drivers.append(name)
+
+            return drivers
 
     def get_doctors_by_weekday(self, weekday_key, target_date):
         import sqlite3
