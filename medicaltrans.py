@@ -1475,10 +1475,58 @@ class MedicalTransApp(tb.Window):
                 child.bind("<Button-1>", lambda e, rid=route_id: self._select_route(rid))
 
     def _select_route(self, route_id):
-        # هذه الدالة سيتم تنفيذها عند الضغط على بطاقة Route
-        # لاحقًا سنجعلها تعرض تفاصيل الـ Route في الجهة اليمنى
+        # تحديد البطاقة المختارة
+        self.selected_route_id = route_id
+
+        # 1. تظليل البطاقة المختارة وإلغاء تظليل الباقي
+        for card in getattr(self, "route_cards", []):
+            if getattr(card, "route_id", None) == route_id:
+                card.config(bg="#f0ad4e", highlightbackground="orange", highlightthickness=2)
+            else:
+                card.config(bg="white", highlightthickness=0)
+
+        # 2. تفعيل زر "إضافة/تعديل Route" ليعمل كزر تعديل
+        if hasattr(self, "add_edit_route_btn"):
+            self.add_edit_route_btn.config(state="normal", text="تعديل Route")  # أو "إضافة/تعديل Route"
+
+        # 3. تفعيل زر الحذف
+        if hasattr(self, "delete_route_btn"):
+            self.delete_route_btn.config(state="normal")
+
+        # 4. عرض تفاصيل البطاقة في إطار العرض الجانبي (للقراءة فقط)
+        self._display_route_details(route_id)
+
+        # 5. (اختياري) إذا كانت نافذة إضافة/تعديل مفتوحة أغلقها
+        if hasattr(self, "_route_popup") and self._route_popup.winfo_exists():
+            self._route_popup.destroy()
+
         print(f"📦 Route المحددة ID = {route_id}")
-        # TODO: تحميل بيانات Route من القاعدة وعرضها في جدول عرض Route
+
+    def _display_route_details(self, route_id):
+        """
+        عرض تفاصيل Route في الإطار الجانبي للقراءة فقط.
+        يمكنك هنا تعبئة الجدول أو أي عناصر واجهة أخرى تعرض بيانات البطاقة.
+        """
+        # جلب البيانات من قاعدة البيانات
+        import sqlite3
+        conn = sqlite3.connect("medicaltrans.db")
+        c = conn.cursor()
+        c.execute("SELECT name, date, driver FROM routes WHERE id=?", (route_id,))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            self.show_message("error", "لم يتم العثور على بيانات Route.")
+            return
+
+        route_name, date, driver = row
+        # الآن اعرض هذه البيانات في عناصر واجهة المستخدم المناسبة لديك
+        # مثال: إذا عندك إطار جانبي أو جدول مخصص للعرض فقط
+        self.route_details_name_label.config(text=route_name)
+        self.route_details_date_label.config(text=date)
+        self.route_details_driver_label.config(text=driver)
+
+        # إذا كنت تعرض جدول المهام (route_tasks)، كرر نفس فكرة الجلب والعرض
+        # ... (يمكنك هنا إضافة المزيد حسب الحاجة)
 
     def _edit_route_popup(self, route_id):
         import sqlite3
@@ -1522,43 +1570,35 @@ class MedicalTransApp(tb.Window):
             self.show_message("error", f"حدث خطأ أثناء تحميل Route:\n{e}")
             return
 
-        # فتح واجهة الإضافة لكنها ستتصرف كواجهة تعديل
-        self._suppress_autoload = True
-        self._add_route_popup()
-        self._suppress_autoload = False
+        # فتح واجهة الإضافة في وضع التعديل عبر تمرير المعرف مباشرة
+        self._add_route_popup(editing_route_id=route_id)
 
-        # ملء الحقول بالبيانات القديمة
-        self._route_inputs["name_entry"].delete(0, "end")
-        self._route_inputs["name_entry"].insert(0, route_name)
-        self._route_inputs["driver_combo"].set(driver)
-        self._route_inputs["window"].title("✏️ تعديل Route")
-
-    def _add_route_popup(self):
+    def _add_route_popup(self, editing_route_id=None):
         import tkinter as tk
         from datetime import datetime, timedelta
+
+        self._editing_route_id = editing_route_id  # None إذا إضافة, أو ID إذا تعديل
 
         # ✅ تحميل أيام الأسبوع وتصفية أيام العطل الرسمية من التقويم
         today = datetime.today()
         days_ahead = (7 - today.weekday()) % 7
         next_monday = today + timedelta(days=days_ahead)
         self.route_days = []
-
-        for i in range(5):  # من الإثنين إلى الجمعة
+        for i in range(5):
             day = next_monday + timedelta(days=i)
-            if not self.is_holiday(day):  # ✅ استبعاد اليوم إن كان عطلة رسمية
+            if not self.is_holiday(day):
                 self.route_days.append(day)
-
         if not self.route_days:
             self.show_message("warning", "لا توجد أيام متاحة هذا الأسبوع (عطل فقط)")
             return
 
-        # ✅ تهيئة بيانات الأسبوع
         self.route_temp_data = {}
         self.route_driver_names = {}
         self.route_start_hours = {}
         self.current_route_index = 0
 
-        win = self.build_centered_popup("➕ إضافة Route جديدة", 1250, 800)
+        win_title = "➕ إضافة Route جديدة" if editing_route_id is None else "✏️ تعديل Route"
+        win = self.build_centered_popup(win_title, 1250, 800)
         self._route_popup = win
 
         # ===== العنوان العلوي =====
@@ -1586,7 +1626,7 @@ class MedicalTransApp(tb.Window):
 
         # ===== السائق وبداية العمل =====
         ttk.Label(top_frame, text="🚗 السائق:").grid(row=0, column=4, sticky="w", padx=5)
-        current_route_day = self.route_days[0]  # لأننا نبدأ دائمًا من اليوم الأول في الأسبوع
+        current_route_day = self.route_days[0]
         driver_combo = ttk.Combobox(top_frame, values=self.get_driver_names(current_route_day), state="readonly", width=20)
         driver_combo.grid(row=0, column=5, padx=5)
 
@@ -1640,6 +1680,20 @@ class MedicalTransApp(tb.Window):
             "date_label": route_date_label,
             "start_hour_combo": start_hour_combo
         }
+
+        # إذا في وضع التعديل، عبئ الحقول
+        if editing_route_id is not None:
+            import sqlite3
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+            c.execute("SELECT name, driver FROM routes WHERE id=?", (editing_route_id,))
+            row = c.fetchone()
+            if row:
+                route_name, driver = row
+                route_name_entry.delete(0, "end")
+                route_name_entry.insert(0, route_name)
+                driver_combo.set(driver)
+            conn.close()
 
         # ✅ تحميل بيانات اليوم الحالي
         if not getattr(self, "_suppress_autoload", False):
@@ -2659,6 +2713,10 @@ class MedicalTransApp(tb.Window):
                 del self._active_doctor_widget
                 del self._active_doctor_window_id
                 self._draw_route_preview()
+                # فك الربط بعد الإغلاق
+                if hasattr(self, "_doctor_selector_binding"):
+                    canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                    del self._doctor_selector_binding
 
         # canvas.bind("<Button-1>", close_on_click_outside, add="+")
 
@@ -2691,6 +2749,9 @@ class MedicalTransApp(tb.Window):
             del self._active_doctor_widget
             del self._active_doctor_window_id
             self._draw_route_preview()
+            if hasattr(self, "_doctor_selector_binding"):
+                canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                del self._doctor_selector_binding
 
         listbox.bind("<Return>", on_select)
         listbox.bind("<Double-Button-1>", on_select)
@@ -2699,6 +2760,8 @@ class MedicalTransApp(tb.Window):
 
         self._active_doctor_widget = container
         self._active_doctor_window_id = widget_id
+        canvas.after(100, lambda: setattr(self, "_doctor_selector_binding", 
+            canvas.bind("<Button-1>", close_on_click_outside, add="+")))
 
     def _show_time_selector(self, row_index, x, y):
         import tkinter as tk
@@ -2760,6 +2823,22 @@ class MedicalTransApp(tb.Window):
         button_frame = tk.Frame(frame, bg="white")
         button_frame.pack(fill="x", pady=4)
 
+        def close_if_click_outside(event):
+            if hasattr(self, "_active_time_window_id"):
+                bbox = canvas.bbox(self._active_time_window_id)
+                if bbox:
+                    x1, y1, x2, y2 = bbox
+                    if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                        return  # النقر داخل النافذة
+                canvas.delete(self._active_time_window_id)
+                del self._active_time_selector
+                del self._active_time_window_id
+                self._draw_route_preview()
+                # فك الربط بعد الإغلاق
+                if hasattr(self, "_time_selector_binding"):
+                    canvas.unbind("<Button-1>", self._time_selector_binding)
+                    del self._time_selector_binding
+
         def apply_time():
             prefix = selected_option.get()
             parent_window = canvas.winfo_toplevel()
@@ -2805,18 +2884,14 @@ class MedicalTransApp(tb.Window):
             del self._active_time_window_id
             self._draw_route_preview()
 
+            if hasattr(self, "_time_selector_binding"):
+                canvas.unbind("<Button-1>", self._time_selector_binding)
+                del self._time_selector_binding
+
         tk.Button(button_frame, text="✔️ تم", command=apply_time, bg="white").pack()
 
-        def close_if_click_outside(event):
-            if hasattr(self, "_active_time_window_id"):
-                bbox = canvas.bbox(self._active_time_window_id)
-                if bbox:
-                    x1, y1, x2, y2 = bbox
-                    if not (x1 <= event.x <= x2 and y1 <= event.y <= y2):
-                        canvas.delete(self._active_time_window_id)
-                        del self._active_time_selector
-                        del self._active_time_window_id
-                        self._draw_route_preview()
+        canvas.after(100, lambda: setattr(self, "_time_selector_binding",
+            canvas.bind("<Button-1>", close_if_click_outside, add="+")))
 
     def _extract_sort_time(self, time_str):
         import re
@@ -2895,6 +2970,10 @@ class MedicalTransApp(tb.Window):
             del self._active_lab_selector
             del self._active_lab_window_id
             self._draw_route_preview()
+            # فك الربط بعد الإغلاق
+            if hasattr(self, "_lab_selector_binding"):
+                canvas.unbind("<Button-1>", self._lab_selector_binding)
+                del self._lab_selector_binding
 
         listbox.bind("<Double-Button-1>", on_select)
         listbox.bind("<Return>", on_select)
@@ -2905,16 +2984,23 @@ class MedicalTransApp(tb.Window):
                 bbox = canvas.bbox(self._active_lab_window_id)
                 if bbox:
                     x1, y1, x2, y2 = bbox
-                    if not (x1 <= event.x <= x2 and y1 <= event.y <= y2):
-                        canvas.delete(self._active_lab_window_id)
-                        del self._active_lab_selector
-                        del self._active_lab_window_id
-                        self._draw_route_preview()
+                    if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                        return  # النقر داخل النافذة
+                canvas.delete(self._active_lab_window_id)
+                del self._active_lab_selector
+                del self._active_lab_window_id
+                self._draw_route_preview()
+                # فك الربط بعد الإغلاق
+                if hasattr(self, "_lab_selector_binding"):
+                    canvas.unbind("<Button-1>", self._lab_selector_binding)
+                    del self._lab_selector_binding
 
         # canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
         self._active_lab_selector = frame
         self._active_lab_window_id = window_id
+        canvas.after(100, lambda: setattr(self, "_lab_selector_binding",
+            canvas.bind("<Button-1>", close_if_click_outside, add="+")))
 
     def _show_material_selector(self, row_index, x, y):
         import tkinter as tk
@@ -2965,6 +3051,10 @@ class MedicalTransApp(tb.Window):
             del self._active_material_window_id
             self._draw_route_preview()
 
+            if hasattr(self, "_material_selector_binding"):
+                canvas.unbind("<Button-1>", self._material_selector_binding)
+                del self._material_selector_binding
+
         btn = tk.Button(frame, text="✔️ تم", command=apply_selection, bg="white")
         btn.pack(pady=4)
 
@@ -2973,13 +3063,21 @@ class MedicalTransApp(tb.Window):
                 bbox = canvas.bbox(self._active_material_window_id)
                 if bbox:
                     x1, y1, x2, y2 = bbox
-                    if not (x1 <= event.x <= x2 and y1 <= event.y <= y2):
-                        canvas.delete(self._active_material_window_id)
-                        del self._active_material_selector
-                        del self._active_material_window_id
-                        self._draw_route_preview()
+                    if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                        return  # النقر داخل النافذة
+                canvas.delete(self._active_material_window_id)
+                del self._active_material_selector
+                del self._active_material_window_id
+                self._draw_route_preview()
+                # فك الربط بعد الإغلاق
+                if hasattr(self, "_material_selector_binding"):
+                    canvas.unbind("<Button-1>", self._material_selector_binding)
+                    del self._material_selector_binding
 
         # canvas.bind("<Button-1>", close_if_click_outside, add="+")
+
+        canvas.after(100, lambda: setattr(self, "_material_selector_binding",
+            canvas.bind("<Button-1>", close_if_click_outside, add="+")))
 
     def get_all_doctor_names(self):
         import sqlite3
@@ -3065,6 +3163,12 @@ class MedicalTransApp(tb.Window):
 
         editing_mode = hasattr(self, "_editing_route_id") and self._editing_route_id is not None
         self._update_notes_from_widgets()  # ✅ تحديث الملاحظات قبل الحفظ
+
+        # إضافة رسالة تأكيد عند التعديل فقط
+        if editing_mode:
+            ask = self.ask_yes_no("تأكيد التعديل", "هل أنت متأكد أنك تريد تعديل هذا الـ Route؟")
+            if not ask:
+                return
 
         try:
             with sqlite3.connect("medicaltrans.db") as conn:
