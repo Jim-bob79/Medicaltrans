@@ -1371,20 +1371,30 @@ class MedicalTransApp(tb.Window):
         left_frame = tb.Frame(frame)
         left_frame.pack(side="left", fill="y", padx=(10, 5), pady=10)
 
-        # زر واحد فقط: إضافة/تعديل Route
-        btns_frame = tb.Frame(left_frame)
-        btns_frame.pack(fill="x", pady=(0, 10))
+        # ✅ إطار مركزي لتوسيط البطاقات
+        cards_wrapper = tb.Frame(frame)
+        cards_wrapper.pack(fill="x", pady=(0, 10))
+
+        self.routes_card_frame = tb.Frame(cards_wrapper)
+        self.routes_card_frame.pack()
+
+        # ✅ أزرار التحكم أسفل البطاقات
+        controls_wrapper = tb.Frame(frame)
+        controls_wrapper.pack(fill="x", pady=(5, 15))
+
+        controls_frame = tb.Frame(controls_wrapper)
+        controls_frame.pack()
+
         self.add_edit_route_btn = ttk.Button(
-            btns_frame,
+            controls_frame,
             text="➕ إضافة Route",
             style="Accent.TButton",
             command=self._on_add_edit_route_btn
         )
         self.add_edit_route_btn.pack(side="left", padx=5)
-    
-        # زر الحذف (معطل افتراضياً)
+
         self.delete_route_btn = ttk.Button(
-            btns_frame,
+            controls_frame,
             text="🗑 حذف Route",
             style="danger.TButton",
             command=self._delete_route,
@@ -1392,42 +1402,16 @@ class MedicalTransApp(tb.Window):
         )
         self.delete_route_btn.pack(side="left", padx=5)
 
-        # === إطار تمرير لعرض البطاقات ===
-        cards_container = tb.Frame(left_frame)
-        cards_container.pack(fill="both", expand=True)
-
-        canvas = tb.Canvas(cards_container, borderwidth=0)
-        scrollbar = ttk.Scrollbar(cards_container, orient="vertical", command=canvas.yview, style="TScrollbar")
-        self.routes_card_frame = tb.Frame(canvas)
-
-        self.routes_card_frame.bind("<Button-1>", lambda e: self._unselect_route())
-
-        self.routes_card_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.routes_card_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
         # === الإطار الأيمن: عرض تفاصيل Route المحددة ===
         right_frame = tb.LabelFrame(frame, text="🚚 عرض Route", padding=10)
         right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=10)
 
-        # ✅ عناصر عرض تفاصيل Route
-        # self.route_details_name_label = ttk.Label(right_frame, text="", font=("Segoe UI", 12, "bold"))
-        # self.route_details_name_label.pack(anchor="w", pady=(5, 2))
-
-        # self.route_details_date_label = ttk.Label(right_frame, text="", font=("Segoe UI", 10))
-        # self.route_details_date_label.pack(anchor="w", pady=2)
-
-        # self.route_details_driver_label = ttk.Label(right_frame, text="", font=("Segoe UI", 10))
-        # self.route_details_driver_label.pack(anchor="w", pady=2)
-
-        # 🆕 إضافة معاينة الجدول في الإطار الأيمن
+        # ✅ Canvas لعرض الجدول
         self.route_main_canvas = tk.Canvas(right_frame, bg="white", width=1100, height=400)
+        # self.route_main_canvas.bind("<Configure>", lambda e: self._draw_route_main_canvas("-", "-"))
         self.route_main_canvas.pack(fill="both", expand=True)
 
-        # 🆕 إطار الأزرار أسفل الجدول
+        # ✅ أزرار التنقل والطباعة
         self.route_main_btns_frame = tb.Frame(right_frame)
         self.route_main_btns_frame.pack(pady=10)
 
@@ -1450,12 +1434,8 @@ class MedicalTransApp(tb.Window):
         self.route_main_print_btn.pack(side="left", padx=5)
 
         self._refresh_route_cards()
-
-        # عند البداية: لا يوجد Route محدد
         self.selected_route_id = None
-        # تأكد أن الزر في وضع الإضافة دائماً عند إنشاء التبويب
         self._update_add_edit_route_btn()
-
         self.route_main_right_frame = right_frame
 
         return frame
@@ -1489,7 +1469,7 @@ class MedicalTransApp(tb.Window):
                 readable_date = date_str
 
             card = tb.Frame(self.routes_card_frame, style="RouteCard.TFrame", borderwidth=2, relief="groove", padding=8)
-            card.pack(fill="x", pady=5, padx=3)
+            card.pack(side="left", padx=5, pady=5)
             card.route_id = route_id  # لتسهيل التظليل لاحقاً
 
             ttk.Label(card, text=f"📛 {name}", font=("Segoe UI", 10, "bold")).pack(anchor="w")
@@ -1528,6 +1508,7 @@ class MedicalTransApp(tb.Window):
                 self.add_edit_route_btn.config(text="➕ إضافة Route", command=self._on_add_edit_route_btn)
 
     def _select_route(self, route_id):
+        print("📌 تم اختيار البطاقة ذات المعرف:", route_id)
         # تحديد البطاقة المختارة
         self.selected_route_id = route_id
 
@@ -1582,6 +1563,7 @@ class MedicalTransApp(tb.Window):
 
     def _display_route_details(self, route_id):
         import sqlite3
+        import json
         from datetime import datetime
 
         try:
@@ -1597,27 +1579,32 @@ class MedicalTransApp(tb.Window):
                 return
 
             route_name, route_date, driver = row
+            print("✅ تحميل Route:", route_name, route_date, driver)
 
             # ✅ تحميل البيانات المرتبطة بالأيام
             c.execute("SELECT day, data FROM route_days WHERE route_id = ?", (route_id,))
             day_rows = c.fetchall()
             conn.close()
+            print("🗓 عدد الأيام:", len(day_rows))
 
             self.route_days = []
             self.route_temp_data = {}
+            self.route_driver_names = {}
+            self.route_start_hours = {}
 
             for day_str, raw_data in day_rows:
+                print(f"📅 قراءة بيانات اليوم: {day_str}")
+                print(f"📦 شكل البيانات الخام:\n{raw_data[:100]}")  # طباعة أول 100 حرف فقط
+
                 day_obj = datetime.strptime(day_str, "%Y-%m-%d").date()
                 self.route_days.append(day_obj)
 
                 try:
-                    # ✅ التعامل مع الشكل الجديد بصيغة JSON
                     data = json.loads(raw_data)
                     self.route_temp_data[day_str] = data.get("rows", [])
                     self.route_driver_names[day_str] = data.get("driver", "-")
                     self.route_start_hours[day_str] = data.get("start", "-")
                 except:
-                    # ✅ الشكل القديم (سطر نصي فقط)
                     rows = []
                     for line in raw_data.strip().split("\n"):
                         cols = line.strip().split("\t")
@@ -1626,10 +1613,11 @@ class MedicalTransApp(tb.Window):
                     self.route_driver_names[day_str] = "-"
                     self.route_start_hours[day_str] = "-"
 
-            self.current_route_index = 0
+                print(f"🔢 عدد الصفوف المحملة لليوم {day_str}: {len(self.route_temp_data[day_str])}")
 
-            # ✅ إنشاء دالة عرض جديدة مخصصة لهذا الـ Canvas
-            self._draw_route_main_canvas(route_name, driver)
+            self.current_route_index = 0
+            self.selected_route_id = route_id
+            self._draw_route_main_canvas()
 
         except Exception as e:
             print("خطأ في تحميل تفاصيل Route:", e)
@@ -2119,25 +2107,55 @@ class MedicalTransApp(tb.Window):
             self._load_route_day()
 
     def _load_prev_route_day(self):
+        if not hasattr(self, "route_days") or not hasattr(self, "current_route_index"):
+            return
         if self.current_route_index > 0:
             self.current_route_index -= 1
             self._refresh_route_day_display()
 
     def _load_next_route_day(self):
+        if not hasattr(self, "route_days") or not hasattr(self, "current_route_index"):
+            return
         if self.current_route_index + 1 < len(self.route_days):
             self.current_route_index += 1
             self._refresh_route_day_display()
 
     def _refresh_route_day_display(self):
-        # تحديد إذا كان العرض داخل نافذة رئيسية أو popup
+        if not hasattr(self, "route_days") or not hasattr(self, "current_route_index"):
+            return
+
         if hasattr(self, "route_main_canvas") and self.route_main_canvas.winfo_exists():
-            # عرض الجدول في تبويب الرئيسية
-            route_id = self.selected_route_id
-            if route_id:
-                self._display_route_details(route_id)
+            self._draw_route_main_canvas()
         else:
-            # عرض الجدول في نافذة popup
             self._load_route_day()
+
+    def _get_route_driver(self, route_id):
+        import sqlite3
+        if not route_id:
+            return None
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+            c.execute("SELECT driver FROM routes WHERE id = ?", (route_id,))
+            row = c.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except:
+            return None
+
+    def _get_route_name(self, route_id):
+        import sqlite3
+        if not route_id:
+            return None
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+            c.execute("SELECT name FROM routes WHERE id = ?", (route_id,))
+            row = c.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except:
+            return None
 
     def _add_manual_route_row(self):
         import tkinter as tk
@@ -2532,7 +2550,26 @@ class MedicalTransApp(tb.Window):
 
         canvas.bind("<Button-1>", on_canvas_click)
 
-    def _draw_route_main_canvas(self, route_name, driver):
+    def _draw_route_main_canvas(self):
+        if not hasattr(self, "route_days") or not self.route_days:
+            return
+
+        import tkinter.font as tkfont
+
+        canvas = self.route_main_canvas
+        canvas.delete("all")
+
+        day = self.route_days[self.current_route_index]
+        day_key = day.strftime("%Y-%m-%d")
+        rows = self.route_temp_data.get(day_key, [])
+
+        route_name = self._get_route_name(self.selected_route_id) or "-"
+        driver = self._get_route_driver(self.selected_route_id) or "-"
+
+        print("🎨 بدء رسم Canvas لـ Route:", route_name)
+        print("🧭 التاريخ الحالي:", self.route_days[self.current_route_index])
+        print("📊 عدد الصفوف:", len(self.route_temp_data.get(self.route_days[self.current_route_index].strftime("%Y-%m-%d"), [])))
+
         import tkinter.font as tkfont
 
         canvas = self.route_main_canvas
@@ -2557,9 +2594,9 @@ class MedicalTransApp(tb.Window):
         column_ratios = [1.5, 1.2, 0.9, 1.5, 2, 2.6]
         total_ratio = sum(column_ratios)
 
-        canvas_width = 1200
+        canvas_width = self.route_main_canvas.winfo_width() or 1200
         col_widths = [int(canvas_width * (r / total_ratio)) for r in column_ratios]
-        x_positions = [30]
+        x_positions = [0]
         for w in col_widths[:-1]:
             x_positions.append(x_positions[-1] + w)
 
@@ -2569,10 +2606,10 @@ class MedicalTransApp(tb.Window):
 
         canvas.create_text(10, y, anchor="nw", text=f"🕗 بداية العمل: -", font=("Segoe UI", 10, "bold"))
         canvas.create_text(total_width // 2, y, anchor="n", text=f"📅 التاريخ: {readable_date}", font=("Segoe UI", 10, "bold"))
-        canvas.create_text(total_width - 10, y, anchor="ne", text=f"🚗 السائق: {driver}", font=("Segoe UI", 10, "bold"))
+        canvas_width = self.route_main_canvas.winfo_width() or 1200
+        canvas.create_text(canvas_width - 10, y, anchor="ne", text=f"🚗 السائق: {driver}", font=("Segoe UI", 10, "bold"))
         y += 30
 
-        canvas.create_text(15, y + default_row_height // 2, anchor="center", text="📍", font=("Segoe UI", 10, "bold"))
         for i, header in enumerate(headers):
             x = x_positions[i]
             canvas.create_rectangle(x, y, x + col_widths[i], y + default_row_height, fill="#dddddd")
@@ -2621,11 +2658,9 @@ class MedicalTransApp(tb.Window):
                     text = str(row_data[i])
                     canvas.create_text(x + 5, y + 5, anchor="nw", text=text, font=font_conf, fill="#000000")
 
-                canvas.create_text(15, y + row_height // 2, anchor="center", text="🔘", font=("Segoe UI", 11))
-
                 y += row_height
 
-        canvas.create_line(0, y, total_width, y, fill="#000000")
+        # canvas.create_line(0, y, total_width, y, fill="#000000")
         canvas.config(scrollregion=(0, 0, total_width, y + 20))
 
     def _edit_note_only_row(self, row_index):
@@ -3440,7 +3475,8 @@ class MedicalTransApp(tb.Window):
 
         # إضافة رسالة تأكيد عند التعديل فقط
         if editing_mode:
-            ask = self.ask_yes_no("تأكيد التعديل", "هل أنت متأكد أنك تريد تعديل هذا الـ Route؟")
+            from tkinter import messagebox
+            ask = messagebox.askyesno("تأكيد التعديل", "هل أنت متأكد أنك تريد تعديل هذا الـ Route؟")
             if not ask:
                 return
 
@@ -3485,6 +3521,17 @@ class MedicalTransApp(tb.Window):
                         VALUES (?, ?, ?)
                     """, (name, day_key, driver_name))
                     route_id = c.lastrowid
+
+                    import json
+                    day_data = {
+                        "rows": rows,
+                        "driver": driver_name,
+                        "start": start_hour
+                    }
+                    c.execute("""
+                        INSERT INTO route_days (route_id, day, data)
+                        VALUES (?, ?, ?)
+                    """, (route_id, day_key, json.dumps(day_data, ensure_ascii=False)))
 
                     for row in rows:
                         doctor, time, lab, desc, address, notes = row
