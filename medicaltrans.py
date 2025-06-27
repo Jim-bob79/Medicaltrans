@@ -1543,7 +1543,7 @@ class MedicalTransApp(tb.Window):
             return
 
         # رسالة تأكيد
-        if not self.show_custom_confirm("تأكيد الحذف", ⚠️ هل تريد حذف هذا الـ Route نهائيًا؟"):
+        if not self.show_custom_confirm("تأكيد الحذف", "⚠️ هل تريد حذف هذا الـ Route نهائيًا؟"):
             return
 
         try:
