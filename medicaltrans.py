@@ -1407,21 +1407,24 @@ class MedicalTransApp(tb.Window):
         left_frame = tb.Frame(frame)
         left_frame.pack(side="left", fill="y", padx=(10, 5), pady=10)
 
-        # أزرار الإضافة والحذف (بدلاً من التعديل)
+        # زر واحد فقط: إضافة/تعديل Route
         btns_frame = tb.Frame(left_frame)
         btns_frame.pack(fill="x", pady=(0, 10))
-        ttk.Button(
-            btns_frame, 
-            text="➕ إضافة Route", 
-            style="Accent.TButton", 
-            command=self._add_route_popup
-        ).pack(side="left", padx=5)
+        self.add_edit_route_btn = ttk.Button(
+            btns_frame,
+            text="➕ إضافة Route",
+            style="Accent.TButton",
+            command=self._on_add_edit_route_btn
+        )
+        self.add_edit_route_btn.pack(side="left", padx=5)
+
+        # زر الحذف (معطل افتراضياً)
         self.delete_route_btn = ttk.Button(
-            btns_frame, 
-            text="🗑 حذف Route", 
-            style="danger.TButton", 
+            btns_frame,
+            text="🗑 حذف Route",
+            style="danger.TButton",
             command=self._delete_route,
-            state="disabled"  # الزر معطل افتراضياً عند بدء البرنامج
+            state="disabled"
         )
         self.delete_route_btn.pack(side="left", padx=5)
 
@@ -1436,7 +1439,7 @@ class MedicalTransApp(tb.Window):
         self.routes_card_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=self.routes_card_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
-
+    
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
@@ -1445,8 +1448,48 @@ class MedicalTransApp(tb.Window):
         right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=10)
 
         self._refresh_route_cards()
+    
+        # عند البداية: لا يوجد Route محدد
+        self.selected_route_id = None
+        # تأكد أن الزر في وضع الإضافة دائماً عند إنشاء التبويب
+        self._update_add_edit_route_btn()
 
         return frame
+
+    def _on_add_edit_route_btn(self):
+        """
+        ينفذ عند الضغط على زر إضافة/تعديل Route ويحدد السلوك المناسب.
+        إذا كان هناك Route محدد، يفتح نافذة التعديل.
+        إذا لم يكن هناك Route محدد، يفتح نافذة الإضافة.
+        """
+        if getattr(self, "selected_route_id", None) is not None:
+            # وضع التعديل: تمرير معرف الـ Route لنافذة التعديل
+            self._add_route_popup(editing_route_id=self.selected_route_id)
+        else:
+            # وضع الإضافة: فتح نافذة إضافة Route جديدة
+            self._add_route_popup(editing_route_id=None)
+
+    def _update_add_edit_route_btn(self):
+        """
+        تحدّث نص ودالة زر إضافة/تعديل Route حسب حالة التحديد.
+        - إذا لا يوجد Route محدد: الزر = إضافة Route.
+        - إذا يوجد Route محدد: الزر = تعديل Route.
+        """
+        if getattr(self, "add_edit_route_btn", None) is None:
+            return  # الزر غير معرف بعد
+
+        if getattr(self, "selected_route_id", None) is not None:
+            # يوجد Route محدد: التعديل
+            self.add_edit_route_btn.configure(
+                text=✏️ تعديل Route",
+                style="Accent.TButton"
+            )
+        else:
+            # لا يوجد Route محدد: الإضافة
+            self.add_edit_route_btn.configure(
+                text="➕ إضافة Route",
+                style="Accent.TButton"
+            )
 
     def _refresh_route_cards(self):
         import sqlite3
