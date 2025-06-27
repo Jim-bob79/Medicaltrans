@@ -297,6 +297,7 @@ class MedicalTransApp(tb.Window):
         self._setup_custom_styles()
         self._build_header()
         self._build_layout()
+        self._init_styles()
         self._configure_styles()
         self.notebook.select(self.tab_frames["الرئيسية"])
         self.check_warnings()
@@ -363,6 +364,11 @@ class MedicalTransApp(tb.Window):
                     c.execute(f"ALTER TABLE doctors ADD COLUMN {col_name} {col_type}")
 
             conn.commit()
+
+    def _init_styles(self):
+        style = tb.Style()
+        style.configure("RouteCard.TFrame", background="#ffffff")
+        style.configure("SelectedRouteCard.TFrame", background="#f0ad4e")
 
     def ask_choice_dialog(self, title, message, options):
         import tkinter as tk
@@ -1448,6 +1454,16 @@ class MedicalTransApp(tb.Window):
         right_frame = tb.LabelFrame(frame, text="🚚 عرض Route", padding=10)
         right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=10)
 
+        # ✅ عناصر عرض تفاصيل Route
+        self.route_details_name_label = ttk.Label(right_frame, text="", font=("Segoe UI", 12, "bold"))
+        self.route_details_name_label.pack(anchor="w", pady=(5, 2))
+
+        self.route_details_date_label = ttk.Label(right_frame, text="", font=("Segoe UI", 10))
+        self.route_details_date_label.pack(anchor="w", pady=2)
+
+        self.route_details_driver_label = ttk.Label(right_frame, text="", font=("Segoe UI", 10))
+        self.route_details_driver_label.pack(anchor="w", pady=2)
+
         self._refresh_route_cards()
 
         # عند البداية: لا يوجد Route محدد
@@ -1485,7 +1501,7 @@ class MedicalTransApp(tb.Window):
             except:
                 readable_date = date_str
 
-            card = tb.Frame(self.routes_card_frame, borderwidth=2, relief="groove", padding=8)
+            card = tb.Frame(self.routes_card_frame, style="RouteCard.TFrame", borderwidth=2, relief="groove", padding=8)
             card.pack(fill="x", pady=5, padx=3)
             card.route_id = route_id  # لتسهيل التظليل لاحقاً
 
@@ -1531,9 +1547,9 @@ class MedicalTransApp(tb.Window):
         # 1. تظليل البطاقة المختارة وإلغاء تظليل الباقي
         for card in getattr(self, "route_cards", []):
             if getattr(card, "route_id", None) == route_id:
-                card.config(bg="#f0ad4e", highlightbackground="orange", highlightthickness=2)
+                card.configure(style="SelectedRouteCard.TFrame")
             else:
-                card.config(bg="white", highlightthickness=0)
+                card.configure(style="RouteCard.TFrame")
 
         # 2. تفعيل زر الحذف عند التحديد
         if hasattr(self, "delete_route_btn"):
@@ -1559,30 +1575,28 @@ class MedicalTransApp(tb.Window):
             self.delete_route_btn.config(state="disabled")
 
     def _display_route_details(self, route_id):
-        """
-        عرض تفاصيل Route في الإطار الجانبي للقراءة فقط.
-        يمكنك هنا تعبئة الجدول أو أي عناصر واجهة أخرى تعرض بيانات البطاقة.
-        """
-        # جلب البيانات من قاعدة البيانات
         import sqlite3
-        conn = sqlite3.connect("medicaltrans.db")
-        c = conn.cursor()
-        c.execute("SELECT name, date, driver FROM routes WHERE id=?", (route_id,))
-        row = c.fetchone()
-        conn.close()
-        if not row:
-            self.show_message("error", "لم يتم العثور على بيانات Route.")
-            return
 
-        route_name, date, driver = row
-        # الآن اعرض هذه البيانات في عناصر واجهة المستخدم المناسبة لديك
-        # مثال: إذا عندك إطار جانبي أو جدول مخصص للعرض فقط
-        self.route_details_name_label.config(text=route_name)
-        self.route_details_date_label.config(text=date)
-        self.route_details_driver_label.config(text=driver)
+        try:
+            conn = sqlite3.connect("medicaltrans.db")
+            c = conn.cursor()
+            c.execute("SELECT name, date, driver FROM routes WHERE id = ?", (route_id,))
+            row = c.fetchone()
+            conn.close()
 
-        # إذا كنت تعرض جدول المهام (route_tasks)، كرر نفس فكرة الجلب والعرض
-        # ... (يمكنك هنا إضافة المزيد حسب الحاجة)
+            if row:
+                route_name, route_date, driver = row
+                self.route_details_name_label.config(text=f"📛 {route_name}")
+                self.route_details_date_label.config(text=f"📅 {route_date}")
+                self.route_details_driver_label.config(text=f"🚗 {driver}")
+            else:
+                self.route_details_name_label.config(text="📛 لم يتم العثور على البيانات")
+                self.route_details_date_label.config(text="")
+                self.route_details_driver_label.config(text="")
+        except Exception as e:
+            self.route_details_name_label.config(text="⚠️ فشل تحميل البيانات")
+            self.route_details_date_label.config(text=str(e))
+            self.route_details_driver_label.config(text="")
 
     def _delete_route(self):
         route_id = getattr(self, "selected_route_id", None)
@@ -1668,11 +1682,11 @@ class MedicalTransApp(tb.Window):
             self.show_message("error", f"حدث خطأ أثناء تحميل Route:\n{e}")
             return
 
-    # فتح واجهة الإضافة في وضع التعديل عبر تمرير المعرف مباشرة
-    # ✅ تحديث زر الإضافة/تعديل Route في الواجهة الرئيسية قبل فتح نافذة التعديل
-    if hasattr(self, "_update_add_edit_route_btn"):
-        self._update_add_edit_route_btn()
-    self._add_route_popup(editing_route_id=route_id)
+        # فتح واجهة الإضافة في وضع التعديل عبر تمرير المعرف مباشرة
+        # ✅ تحديث زر الإضافة/تعديل Route في الواجهة الرئيسية قبل فتح نافذة التعديل
+        if hasattr(self, "_update_add_edit_route_btn"):
+            self._update_add_edit_route_btn()
+        self._add_route_popup(editing_route_id=route_id)
 
     def _add_route_popup(self, editing_route_id=None):
         import tkinter as tk
