@@ -1552,13 +1552,14 @@ class MedicalTransApp(tb.Window):
         if hasattr(self, "delete_route_btn"):
             self.delete_route_btn.config(state="normal")
 
-        # تحديث زر إضافة/تعديل Route حسب التحديد
-        self._update_add_edit_route_btn()
+        # 3. تحديث زر إضافة/تعديل Route حسب التحديد
+        if hasattr(self, "_update_add_edit_route_btn"):
+            self._update_add_edit_route_btn()
 
-        # 3. عرض تفاصيل البطاقة في إطار العرض الجانبي (للقراءة فقط)
+        # 4. عرض تفاصيل البطاقة في إطار العرض الجانبي (للقراءة فقط)
         self._display_route_details(route_id)
 
-        # 4. (اختياري) إذا كانت نافذة منبثقة مفتوحة أغلقها
+        # 5. (اختياري) إذا كانت نافذة منبثقة مفتوحة أغلقها
         if hasattr(self, "_route_popup") and self._route_popup.winfo_exists():
             self._route_popup.destroy()
 
@@ -1674,8 +1675,11 @@ class MedicalTransApp(tb.Window):
             self.show_message("error", f"حدث خطأ أثناء تحميل Route:\n{e}")
             return
 
-        # فتح واجهة الإضافة في وضع التعديل عبر تمرير المعرف مباشرة
-        self._add_route_popup(editing_route_id=route_id)
+    # فتح واجهة الإضافة في وضع التعديل عبر تمرير المعرف مباشرة
+    # ✅ تحديث زر الإضافة/تعديل Route في الواجهة الرئيسية قبل فتح نافذة التعديل
+    if hasattr(self, "_update_add_edit_route_btn"):
+        self._update_add_edit_route_btn()
+    self._add_route_popup(editing_route_id=route_id)
 
     def _add_route_popup(self, editing_route_id=None):
         import tkinter as tk
