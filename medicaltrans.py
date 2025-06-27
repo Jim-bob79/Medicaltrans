@@ -1816,23 +1816,12 @@ class MedicalTransApp(tb.Window):
         driver_combo.bind("<FocusOut>", update_driver_and_time)
         start_hour_combo.bind("<FocusOut>", update_driver_and_time)
 
+        # --------- تحديث زر إضافة/تعديل Route في الواجهة الرئيسية بعد إغلاق النافذة ----------
         def on_popup_close():
             if hasattr(self, "_editing_route_id"):
                 self._editing_route_id = None
             self._update_add_edit_route_btn()
             win.destroy()
-        win.protocol("WM_DELETE_WINDOW", on_popup_close)
-
-        # --------- تحديث زر إضافة/تعديل Route في الواجهة الرئيسية بعد إغلاق النافذة ----------
-        def on_popup_close():
-            # إعادة ضبط المتغير الخاص بالتعديل عند الإغلاق
-            if hasattr(self, "_editing_route_id"):
-                self._editing_route_id = None
-            # تحديث زر إضافة/تعديل Route الرئيسي حسب آخر حالة
-            if hasattr(self, "_update_add_edit_route_btn"):
-                self._update_add_edit_route_btn()
-            win.destroy()
-
         win.protocol("WM_DELETE_WINDOW", on_popup_close)
 
     def _confirm_close_route_popup(self):
