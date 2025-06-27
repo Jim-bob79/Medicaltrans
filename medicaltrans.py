@@ -1417,7 +1417,7 @@ class MedicalTransApp(tb.Window):
             command=self._on_add_edit_route_btn
         )
         self.add_edit_route_btn.pack(side="left", padx=5)
-
+    
         # زر الحذف (معطل افتراضياً)
         self.delete_route_btn = ttk.Button(
             btns_frame,
@@ -1439,7 +1439,7 @@ class MedicalTransApp(tb.Window):
         self.routes_card_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=self.routes_card_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
-    
+
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
@@ -1448,7 +1448,7 @@ class MedicalTransApp(tb.Window):
         right_frame.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=10)
 
         self._refresh_route_cards()
-    
+
         # عند البداية: لا يوجد Route محدد
         self.selected_route_id = None
         # تأكد أن الزر في وضع الإضافة دائماً عند إنشاء التبويب
@@ -1508,6 +1508,7 @@ class MedicalTransApp(tb.Window):
             self.show_message("error", f"فشل تحميل Routes: {e}")
             return
 
+        self.route_cards = []
         for route in routes:
             route_id, name, date_str, driver = route
 
@@ -1520,6 +1521,7 @@ class MedicalTransApp(tb.Window):
 
             card = tb.Frame(self.routes_card_frame, borderwidth=2, relief="groove", padding=8)
             card.pack(fill="x", pady=5, padx=3)
+            card.route_id = route_id  # لتسهيل التظليل لاحقاً
 
             ttk.Label(card, text=f"📛 {name}", font=("Segoe UI", 10, "bold")).pack(anchor="w")
             ttk.Label(card, text=f"📅 {readable_date}").pack(anchor="w")
@@ -1528,6 +1530,12 @@ class MedicalTransApp(tb.Window):
             card.bind("<Button-1>", lambda e, rid=route_id: self._select_route(rid))
             for child in card.winfo_children():
                 child.bind("<Button-1>", lambda e, rid=route_id: self._select_route(rid))
+
+            self.route_cards.append(card)
+
+        # إعادة ضبط زر الإضافة/تعديل للوضع الافتراضي عند إعادة تحميل البطاقات
+        self.selected_route_id = None
+        self._update_add_edit_route_btn()
 
     def _select_route(self, route_id):
         # تحديد البطاقة المختارة
@@ -1543,7 +1551,10 @@ class MedicalTransApp(tb.Window):
         # 2. تفعيل زر الحذف عند التحديد
         if hasattr(self, "delete_route_btn"):
             self.delete_route_btn.config(state="normal")
-    
+
+        # تحديث زر إضافة/تعديل Route حسب التحديد
+        self._update_add_edit_route_btn()
+
         # 3. عرض تفاصيل البطاقة في إطار العرض الجانبي (للقراءة فقط)
         self._display_route_details(route_id)
 
@@ -1671,7 +1682,7 @@ class MedicalTransApp(tb.Window):
         from datetime import datetime, timedelta
 
         self._editing_route_id = editing_route_id  # None إذا إضافة, أو ID إذا تعديل
-
+    
         # ✅ تحميل أيام الأسبوع وتصفية أيام العطل الرسمية من التقويم
         today = datetime.today()
         days_ahead = (7 - today.weekday()) % 7
@@ -1690,7 +1701,7 @@ class MedicalTransApp(tb.Window):
         self.route_start_hours = {}
         self.current_route_index = 0
 
-        win_title = "➕ إضافة Route جديدة" if editing_route_id is None else "✏️ تعديل Route"
+        win_title = "➕ إضافة Route جديدة" if editing_route_id is None else ✏️ تعديل Route"
         win = self.build_centered_popup(win_title, 1250, 800)
         self._route_popup = win
 
@@ -1797,7 +1808,7 @@ class MedicalTransApp(tb.Window):
             if self.route_days:
                 day = self.route_days[self.current_route_index]
                 day_key = day.strftime("%Y-%m-%d")
-
+    
                 self._route_inputs["driver_combo"]["values"] = self.get_driver_names(day)
                 self.route_driver_names[day_key] = driver_combo.get().strip()
                 self.route_start_hours[day_key] = start_hour_combo.get().strip()
@@ -1809,6 +1820,18 @@ class MedicalTransApp(tb.Window):
         start_hour_combo.bind("<FocusOut>", update_driver_and_time)
 
         win.protocol("WM_DELETE_WINDOW", self._confirm_close_route_popup)
+
+        # --------- تحديث زر إضافة/تعديل Route في الواجهة الرئيسية بعد إغلاق النافذة ----------
+        def on_popup_close():
+            # إعادة ضبط المتغير الخاص بالتعديل عند الإغلاق
+            if hasattr(self, "_editing_route_id"):
+                self._editing_route_id = None
+            # تحديث زر إضافة/تعديل Route الرئيسي حسب آخر حالة
+            if hasattr(self, "_update_add_edit_route_btn"):
+                self._update_add_edit_route_btn()
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_popup_close)
 
     def _confirm_close_route_popup(self):
         self.show_message(
@@ -3329,6 +3352,7 @@ class MedicalTransApp(tb.Window):
 
             if not apply_only:
                 self._route_popup.destroy()
+                self._update_add_edit_route_btn()
                 self._refresh_route_cards()
                 self.show_message("success", "✅ تم حفظ Route بنجاح.")
             else:
