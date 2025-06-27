@@ -1437,6 +1437,7 @@ class MedicalTransApp(tb.Window):
         self.routes_card_frame = tb.Frame(canvas)
 
         self.routes_card_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self.routes_card_frame.bind("<Button-1>", lambda e: self._unselect_route())
         canvas.create_window((0, 0), window=self.routes_card_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
@@ -1455,41 +1456,6 @@ class MedicalTransApp(tb.Window):
         self._update_add_edit_route_btn()
 
         return frame
-
-    def _on_add_edit_route_btn(self):
-        """
-        ينفذ عند الضغط على زر إضافة/تعديل Route ويحدد السلوك المناسب.
-        إذا كان هناك Route محدد، يفتح نافذة التعديل.
-        إذا لم يكن هناك Route محدد، يفتح نافذة الإضافة.
-        """
-        if getattr(self, "selected_route_id", None) is not None:
-            # وضع التعديل: تمرير معرف الـ Route لنافذة التعديل
-            self._add_route_popup(editing_route_id=self.selected_route_id)
-        else:
-            # وضع الإضافة: فتح نافذة إضافة Route جديدة
-            self._add_route_popup(editing_route_id=None)
-
-    def _update_add_edit_route_btn(self):
-        """
-        تحدّث نص ودالة زر إضافة/تعديل Route حسب حالة التحديد.
-        - إذا لا يوجد Route محدد: الزر = إضافة Route.
-        - إذا يوجد Route محدد: الزر = تعديل Route.
-        """
-        if getattr(self, "add_edit_route_btn", None) is None:
-            return  # الزر غير معرف بعد
-
-        if getattr(self, "selected_route_id", None) is not None:
-            # يوجد Route محدد: التعديل
-            self.add_edit_route_btn.configure(
-                text=✏️ تعديل Route",
-                style="Accent.TButton"
-            )
-        else:
-            # لا يوجد Route محدد: الإضافة
-            self.add_edit_route_btn.configure(
-                text="➕ إضافة Route",
-                style="Accent.TButton"
-            )
 
     def _refresh_route_cards(self):
         import sqlite3
@@ -1537,6 +1503,27 @@ class MedicalTransApp(tb.Window):
         self.selected_route_id = None
         self._update_add_edit_route_btn()
 
+    def _on_add_edit_route_btn(self):
+        """
+        منطق زر إضافة/تعديل Route الذكي:
+        - إذا لا يوجد بطاقة محددة: نافذة إضافة جديدة.
+        - إذا هناك بطاقة محددة: نافذة تعديل مع تمرير الـroute_id.
+        """
+        if getattr(self, "selected_route_id", None) is not None:
+            self._edit_route_popup(self.selected_route_id)
+        else:
+            self._add_route_popup()
+
+    def _update_add_edit_route_btn(self):
+        """
+        تحديث نص ووظيفة زر إضافة/تعديل Route حسب التحديد.
+        """
+        if hasattr(self, "add_edit_route_btn"):
+            if getattr(self, "selected_route_id", None) is not None:
+                self.add_edit_route_btn.config(text=✏️ تعديل Route", command=self._on_add_edit_route_btn)
+            else:
+                self.add_edit_route_btn.config(text="➕ إضافة Route", command=self._on_add_edit_route_btn)
+
     def _select_route(self, route_id):
         # تحديد البطاقة المختارة
         self.selected_route_id = route_id
@@ -1564,6 +1551,12 @@ class MedicalTransApp(tb.Window):
             self._route_popup.destroy()
 
         print(f"📦 Route المحددة ID = {route_id}")
+
+    def _unselect_route(self):
+        self.selected_route_id = None
+        self._update_add_edit_route_btn()
+        if hasattr(self, "delete_route_btn"):
+            self.delete_route_btn.config(state="disabled")
 
     def _display_route_details(self, route_id):
         """
@@ -1823,7 +1816,12 @@ class MedicalTransApp(tb.Window):
         driver_combo.bind("<FocusOut>", update_driver_and_time)
         start_hour_combo.bind("<FocusOut>", update_driver_and_time)
 
-        win.protocol("WM_DELETE_WINDOW", self._confirm_close_route_popup)
+        def on_popup_close():
+            if hasattr(self, "_editing_route_id"):
+                self._editing_route_id = None
+            self._update_add_edit_route_btn()
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", on_popup_close)
 
         # --------- تحديث زر إضافة/تعديل Route في الواجهة الرئيسية بعد إغلاق النافذة ----------
         def on_popup_close():
