@@ -1520,7 +1520,7 @@ class MedicalTransApp(tb.Window):
         """
         if hasattr(self, "add_edit_route_btn"):
             if getattr(self, "selected_route_id", None) is not None:
-                self.add_edit_route_btn.config(text=✏️ تعديل Route", command=self._on_add_edit_route_btn)
+                self.add_edit_route_btn.config(text="✏️ تعديل Route", command=self._on_add_edit_route_btn)
             else:
                 self.add_edit_route_btn.config(text="➕ إضافة Route", command=self._on_add_edit_route_btn)
 
@@ -1698,7 +1698,7 @@ class MedicalTransApp(tb.Window):
         self.route_start_hours = {}
         self.current_route_index = 0
 
-        win_title = "➕ إضافة Route جديدة" if editing_route_id is None else ✏️ تعديل Route"
+        win_title = "➕ إضافة Route جديدة" if editing_route_id is None else "✏️ تعديل Route"
         win = self.build_centered_popup(win_title, 1250, 800)
         self._route_popup = win
 
