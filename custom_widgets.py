@@ -72,6 +72,9 @@ class CustomDatePicker(tb.Frame):
         self._outside_click_binding = None
 
     def _draw_calendar(self):
+        if not hasattr(self, "_calendar_frame") or not self._calendar_frame.winfo_exists():
+            return
+
         for widget in self._calendar_frame.winfo_children():
             widget.destroy()
 
@@ -95,7 +98,7 @@ class CustomDatePicker(tb.Frame):
                 .grid(row=0, column=i, padx=1, pady=1)
 
         first_day = self.current_date
-        start_day = (first_day.weekday() + 1) % 7
+        start_day = first_day.weekday()
         next_month = (self.current_date.replace(day=28) + timedelta(days=4)).replace(day=1)
         num_days = (next_month - first_day).days
 
@@ -127,7 +130,11 @@ class CustomDatePicker(tb.Frame):
             month = 1
             year += 1
         self.current_date = datetime(year, month, 1)
-        self._draw_calendar()
+
+        # ✅ تحقق قبل إعادة رسم التقويم
+        if hasattr(self, "popup") and self.popup.winfo_exists() \
+           and hasattr(self, "_calendar_frame") and self._calendar_frame.winfo_exists():
+            self._draw_calendar()
 
     def _select_date(self, day):
         date = datetime(self.current_date.year, self.current_date.month, day)
