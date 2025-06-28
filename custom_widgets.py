@@ -72,7 +72,10 @@ class CustomDatePicker(tb.Frame):
         self._outside_click_binding = None
 
     def _draw_calendar(self):
-        if not hasattr(self, "_calendar_frame") or not self._calendar_frame.winfo_exists():
+        # ✅ تأكد أن النافذة لا تزال موجودة
+        if not hasattr(self, 'popup') or not self.popup.winfo_exists():
+            return
+        if not hasattr(self, '_calendar_frame') or not self._calendar_frame.winfo_exists():
             return
 
         for widget in self._calendar_frame.winfo_children():
@@ -121,6 +124,10 @@ class CustomDatePicker(tb.Frame):
                 row += 1
 
     def _change_month(self, offset):
+        # ✅ تحقق من بقاء النافذة
+        if not hasattr(self, 'popup') or not self.popup.winfo_exists():
+            return
+
         year = self.current_date.year
         month = self.current_date.month + offset
         if month < 1:
@@ -131,10 +138,7 @@ class CustomDatePicker(tb.Frame):
             year += 1
         self.current_date = datetime(year, month, 1)
 
-        # ✅ تحقق قبل إعادة رسم التقويم
-        if hasattr(self, "popup") and self.popup.winfo_exists() \
-           and hasattr(self, "_calendar_frame") and self._calendar_frame.winfo_exists():
-            self._draw_calendar()
+        self._draw_calendar()
 
     def _select_date(self, day):
         date = datetime(self.current_date.year, self.current_date.month, day)
