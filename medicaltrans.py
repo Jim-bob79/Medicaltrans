@@ -1639,27 +1639,46 @@ class MedicalTransApp(tb.Window):
             self.show_message("warning", "يرجى تحديد Route أولاً قبل الحذف.")
             return
 
-        # رسالة تأكيد
         if not self.show_custom_confirm("تأكيد الحذف", "⚠️ هل تريد حذف هذا الـ Route نهائيًا؟"):
             return
 
         try:
             import sqlite3
+            import json
             conn = sqlite3.connect("medicaltrans.db")
             c = conn.cursor()
 
-            # حذف من جدول route_tasks أولًا
-            c.execute("SELECT name, date, driver FROM routes WHERE id = ?", (route_id,))
+            # ✅ جلب بيانات route_name والسائق
+            c.execute("SELECT name, driver FROM routes WHERE id = ?", (route_id,))
             row = c.fetchone()
-            if row:
-                route_name, date, driver = row
-                c.execute("DELETE FROM route_tasks WHERE route_name = ? AND date = ? AND driver = ?", (route_name, date, driver))
-            # حذف الـ Route نفسه
+            if not row:
+                self.show_message("error", "❌ لم يتم العثور على Route.")
+                conn.close()
+                return
+
+            route_name, driver = row
+
+            # ✅ جلب جميع الأيام المرتبطة بالـ Route
+            c.execute("SELECT day FROM route_days WHERE route_id = ?", (route_id,))
+            day_rows = c.fetchall()
+            day_keys = [row[0] for row in day_rows]
+
+            # ✅ حذف المهام المرتبطة بكل يوم
+            for day_key in day_keys:
+                c.execute("""
+                    DELETE FROM route_tasks 
+                    WHERE route_name = ? AND driver = ? AND date = ?
+                """, (route_name, driver, day_key))
+
+            # ✅ حذف الأيام
+            c.execute("DELETE FROM route_days WHERE route_id = ?", (route_id,))
+
+            # ✅ حذف السطر الرئيسي من جدول routes
             c.execute("DELETE FROM routes WHERE id = ?", (route_id,))
+
             conn.commit()
             conn.close()
 
-            # تحديث الواجهة بعد الحذف
             self.selected_route_id = None
             self._refresh_route_cards()
             if hasattr(self, "delete_route_btn"):
@@ -1670,7 +1689,8 @@ class MedicalTransApp(tb.Window):
                 self.route_details_date_label.config(text="")
             if hasattr(self, "route_details_driver_label"):
                 self.route_details_driver_label.config(text="")
-            self.show_message("success", "✅ تم حذف الـ Route بنجاح.")
+
+            self.show_message("success", "✅ تم حذف الـ Route بكافة أيامه بنجاح.")
 
         except Exception as e:
             self.show_message("error", f"حدث خطأ أثناء الحذف:\n{e}")
@@ -1729,9 +1749,8 @@ class MedicalTransApp(tb.Window):
         import sqlite3
         import json
 
-        self._editing_route_id = editing_route_id  # None إذا إضافة, أو ID إذا تعديل
-    
-        # ✅ تحميل أيام الأسبوع وتصفية أيام العطل الرسمية من التقويم
+        self._editing_route_id = editing_route_id
+
         today = datetime.today()
         days_ahead = (7 - today.weekday()) % 7
         next_monday = today + timedelta(days=days_ahead)
@@ -1753,7 +1772,6 @@ class MedicalTransApp(tb.Window):
         win = self.build_centered_popup(win_title, 1250, 800)
         self._route_popup = win
 
-        # ===== العنوان العلوي =====
         top_frame = tb.Frame(win)
         top_frame.pack(fill="x", padx=10, pady=10)
 
@@ -1769,14 +1787,11 @@ class MedicalTransApp(tb.Window):
         route_date_label = ttk.Label(top_frame, text="", width=20)
         route_date_label.grid(row=0, column=3, padx=5)
 
-        # ✅ أزرار التنقل بين الأيام
         self._route_prev_btn = ttk.Button(top_frame, text="⬅️ السابق", command=self._prev_route_day)
         self._route_prev_btn.grid(row=0, column=8, padx=5)
-
         self._route_next_btn = ttk.Button(top_frame, text="التالي ➡️", command=self._next_route_day)
         self._route_next_btn.grid(row=0, column=9, padx=5)
 
-        # ===== السائق وبداية العمل =====
         ttk.Label(top_frame, text="🚗 السائق:").grid(row=0, column=4, sticky="w", padx=5)
         current_route_day = self.route_days[0]
         driver_combo = ttk.Combobox(top_frame, values=self.get_driver_names(current_route_day), state="readonly", width=20)
@@ -1791,21 +1806,17 @@ class MedicalTransApp(tb.Window):
         )
         start_hour_combo.grid(row=0, column=7, padx=5)
 
-        # ===== قسم الطبيب / المخبر =====
         doctor_input_frame = tb.LabelFrame(win, text="🏥 إضافة مخبر إلى Route", padding=10)
         doctor_input_frame.pack(fill="x", padx=10, pady=(5, 10))
-
         self._doctor_lab_checks_frame = tb.Frame(doctor_input_frame)
         self._doctor_lab_checks_frame.pack(fill="x", pady=(10, 5))
         self._doctor_lab_vars = {}
 
-        # ===== جدول المعاينة =====
         canvas_frame = tb.Frame(win)
         canvas_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.route_preview_canvas = tb.Canvas(canvas_frame, bg="white", width=1100, height=400)
         self.route_preview_canvas.pack(fill="both", expand=True)
 
-        # ===== الأزرار السفلية =====
         button_frame = tb.Frame(win)
         button_frame.pack(fill="x", pady=(10, 10), padx=10)
 
@@ -1833,22 +1844,17 @@ class MedicalTransApp(tb.Window):
             "start_hour_combo": start_hour_combo
         }
 
-        # إذا في وضع التعديل، عبئ الحقول
         if editing_route_id is not None:
-            import sqlite3
             conn = sqlite3.connect("medicaltrans.db")
             c = conn.cursor()
-            c.execute("SELECT name, driver FROM routes WHERE id=?", (editing_route_id,))
+            c.execute("SELECT name FROM routes WHERE id=?", (editing_route_id,))
             row = c.fetchone()
             if row:
-                route_name, driver = row
+                route_name = row[0]
                 route_name_entry.delete(0, "end")
                 route_name_entry.insert(0, route_name)
-                driver_combo.set(driver)
             conn.close()
 
-        # ✅ تحميل start_hour من جدول route_days
-        import json
         try:
             conn = sqlite3.connect("medicaltrans.db")
             c = conn.cursor()
@@ -1857,24 +1863,33 @@ class MedicalTransApp(tb.Window):
                 try:
                     data = json.loads(data_json)
                     start = data.get("start", "").strip()
+                    driver = data.get("driver", "").strip()
                     if start:
                         self.route_start_hours[day_str] = start
+                    if driver:
+                        self.route_driver_names[day_str] = driver
                 except:
                     continue
             conn.close()
         except Exception as e:
-            print("⚠️ فشل تحميل بيانات start_hour:", e)
+            print("⚠️ فشل تحميل بيانات start_hour/driver:", e)
 
-        # ✅ تحميل بيانات اليوم الحالي
+        if self.route_days:
+            first_day_key = self.route_days[0].strftime("%Y-%m-%d")
+            driver_for_day = self.route_driver_names.get(first_day_key, "")
+            if driver_for_day:
+                driver_combo.set(driver_for_day)
+            start_hour = self.route_start_hours.get(first_day_key, "")
+            if start_hour:
+                start_hour_combo.set(start_hour)
+
         if not getattr(self, "_suppress_autoload", False):
             self._load_route_day()
 
-        # ✅ حفظ وقت السائق عند تغييره
         def update_driver_and_time(*_):
             if self.route_days:
                 day = self.route_days[self.current_route_index]
                 day_key = day.strftime("%Y-%m-%d")
-    
                 self._route_inputs["driver_combo"]["values"] = self.get_driver_names(day)
                 self.route_driver_names[day_key] = driver_combo.get().strip()
                 self.route_start_hours[day_key] = start_hour_combo.get().strip()
@@ -1885,7 +1900,6 @@ class MedicalTransApp(tb.Window):
         driver_combo.bind("<FocusOut>", update_driver_and_time)
         start_hour_combo.bind("<FocusOut>", update_driver_and_time)
 
-        # --------- تحديث زر إضافة/تعديل Route في الواجهة الرئيسية بعد إغلاق النافذة ----------
         def on_popup_close():
             if hasattr(self, "_editing_route_id"):
                 self._editing_route_id = None
@@ -2175,9 +2189,11 @@ class MedicalTransApp(tb.Window):
         else:
             self._load_route_day()
 
-        day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
-        if "start_hour_combo" in self._route_inputs:
-            self._route_inputs["start_hour_combo"].set(self.route_start_hours.get(day_key, ""))
+        # 💡 تحديث عناصر الواجهة فقط إذا كنا في نافذة التعديل/الإضافة
+        if hasattr(self, "_route_inputs"):
+            day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
+            if "start_hour_combo" in self._route_inputs:
+                self._route_inputs["start_hour_combo"].set(self.route_start_hours.get(day_key, ""))
 
     def _update_route_nav_buttons(self):
         """تحديث حالة أزرار التنقل حسب موقع اليوم الحالي"""
@@ -3523,7 +3539,6 @@ class MedicalTransApp(tb.Window):
             self.show_message("error", "❌ بيانات السائق أو بداية العمل غير متوفرة.")
             return
 
-        # ✅ تحقق من وجود بيانات على الأقل ليوم واحد
         has_data = any(self.route_temp_data.get(day.strftime("%Y-%m-%d"), []) for day in self.route_days)
         if not has_data:
             self.show_message("warning", "❌ لا توجد بيانات لحفظ Route.")
@@ -3533,7 +3548,7 @@ class MedicalTransApp(tb.Window):
         self._update_notes_from_widgets()
         self._update_route_start_hour()
 
-        if editing_mode:
+        if editing_mode and not apply_only:
             from tkinter import messagebox
             ask = messagebox.askyesno("تأكيد التعديل", "هل أنت متأكد أنك تريد تعديل هذا الـ Route؟")
             if not ask:
@@ -3544,25 +3559,23 @@ class MedicalTransApp(tb.Window):
                 c = conn.cursor()
 
                 if editing_mode:
-                    c.execute("SELECT date FROM routes WHERE id = ?", (self._editing_route_id,))
-                    date_row = c.fetchone()
-                    if date_row:
-                        old_date = date_row[0]
-                        c.execute("DELETE FROM routes WHERE name = ? AND driver = ? AND date = ?", (name, driver, old_date))
-                        c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ? AND date = ?", (name, driver, old_date))
+                    # حذف كافة السجلات المرتبطة بـ route_id
+                    c.execute("DELETE FROM routes WHERE id = ?", (self._editing_route_id,))
+                    c.execute("DELETE FROM route_days WHERE route_id = ?", (self._editing_route_id,))
+                    c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ?", (name, driver))
+                    route_id = self._editing_route_id  # إعادة استخدام نفس route_id
                 else:
+                    # حذف السجلات السابقة لنفس الاسم والسائق
                     c.execute("DELETE FROM routes WHERE name = ? AND driver = ?", (name, driver))
                     c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ?", (name, driver))
+                    # إنشاء route جديد
+                    first_date = self.route_days[0].strftime("%Y-%m-%d")
+                    c.execute("""
+                        INSERT INTO routes (name, date, driver)
+                        VALUES (?, ?, ?)
+                    """, (name, first_date, driver))
+                    route_id = c.lastrowid
 
-                # 🟩 حفظ route الرئيسي مرة واحدة فقط
-                first_date = self.route_days[0].strftime("%Y-%m-%d")
-                c.execute("""
-                    INSERT INTO routes (name, date, driver)
-                    VALUES (?, ?, ?)
-                """, (name, first_date, driver))
-                route_id = c.lastrowid
-
-                # 🔁 حفظ بقية الأيام
                 for date in self.route_days:
                     day_key = date.strftime("%Y-%m-%d")
                     rows = self.route_temp_data.get(day_key, [])
@@ -3607,7 +3620,7 @@ class MedicalTransApp(tb.Window):
 
                 conn.commit()
 
-            if editing_mode:
+            if editing_mode and not apply_only:
                 del self._editing_route_id
 
             if not apply_only:
