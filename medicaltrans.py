@@ -945,7 +945,7 @@ class MedicalTransApp(tb.Window):
                 if col_name in excluded_columns:
                     continue
 
-                if isinstance(cell, str) and ("\n" in cell or len(cell) > 50):
+                if isinstance(cell, str):
                     cell = Paragraph(cell.replace("\n", "<br/>"), wrapped_style)
                 filtered_row.append(cell)
 
@@ -1549,16 +1549,20 @@ class MedicalTransApp(tb.Window):
 
     def _unselect_route(self):
         self.selected_route_id = None
-        # أعد تلوين كل البطاقات إلى الشكل الافتراضي (مثلاً style="RouteCard.TFrame" أو لون أبيض)
+
+        # إعادة تلوين البطاقات
         for card in getattr(self, "route_cards", []):
             card.config(style="RouteCard.TFrame")
-        # أعد الزر إلى وضع الإضافة
+
+        # زر الإضافة
         if hasattr(self, "add_edit_route_btn"):
             self.add_edit_route_btn.config(state="normal", text="➕ إضافة Route")
-        # عطّل زر الحذف
+
+        # تعطيل زر الحذف
         if hasattr(self, "delete_route_btn"):
             self.delete_route_btn.config(state="disabled")
-        # فرغ تفاصيل العرض الجانبي
+
+        # تفريغ التفاصيل
         if hasattr(self, "route_details_name_label"):
             self.route_details_name_label.config(text="")
         if hasattr(self, "route_details_date_label"):
@@ -1566,8 +1570,24 @@ class MedicalTransApp(tb.Window):
         if hasattr(self, "route_details_driver_label"):
             self.route_details_driver_label.config(text="")
 
-        self.route_main_prev_btn.config(state="disabled")
-        self.route_main_next_btn.config(state="disabled")
+        # تعطيل التنقل بين الأيام
+        if hasattr(self, "route_main_prev_btn"):
+            self.route_main_prev_btn.config(state="disabled")
+        if hasattr(self, "route_main_next_btn"):
+            self.route_main_next_btn.config(state="disabled")
+
+        # ✅ تفريغ الـ Canvas دون تدميره
+        if hasattr(self, "route_main_canvas") and self.route_main_canvas:
+            try:
+                self.route_main_canvas.delete("all")
+            except:
+                pass
+
+        # ✅ مسح البيانات
+        self.route_days = []
+        self.current_route_index = 0
+        self.route_start_hours = {}
+        self._route_inputs = {}
 
     def _display_route_details(self, route_id):
         import sqlite3
@@ -1681,6 +1701,7 @@ class MedicalTransApp(tb.Window):
 
             self.selected_route_id = None
             self._refresh_route_cards()
+            self._unselect_route()
             if hasattr(self, "delete_route_btn"):
                 self.delete_route_btn.config(state="disabled")
             if hasattr(self, "route_details_name_label"):
@@ -2184,6 +2205,9 @@ class MedicalTransApp(tb.Window):
         if not hasattr(self, "route_days") or not hasattr(self, "current_route_index"):
             return
 
+        if not self.route_days or self.current_route_index >= len(self.route_days):
+            return  # ✅ حماية إضافية في حال تم مسح الأيام
+
         if hasattr(self, "route_main_canvas") and self.route_main_canvas.winfo_exists():
             self._draw_route_main_canvas()
         else:
@@ -2193,7 +2217,9 @@ class MedicalTransApp(tb.Window):
         if hasattr(self, "_route_inputs"):
             day_key = self.route_days[self.current_route_index].strftime("%Y-%m-%d")
             if "start_hour_combo" in self._route_inputs:
-                self._route_inputs["start_hour_combo"].set(self.route_start_hours.get(day_key, ""))
+                combo = self._route_inputs["start_hour_combo"]
+                if combo.winfo_exists():  # ✅ حماية من استدعاء عنصر تم تدميره
+                    combo.set(self.route_start_hours.get(day_key, ""))
 
     def _update_route_nav_buttons(self):
         """تحديث حالة أزرار التنقل حسب موقع اليوم الحالي"""
@@ -2209,20 +2235,6 @@ class MedicalTransApp(tb.Window):
             self.route_main_next_btn.config(state="disabled")
         else:
             self.route_main_next_btn.config(state="normal")
-
-    def _get_route_driver(self, route_id):
-        import sqlite3
-        if not route_id:
-            return None
-        try:
-            conn = sqlite3.connect("medicaltrans.db")
-            c = conn.cursor()
-            c.execute("SELECT driver FROM routes WHERE id = ?", (route_id,))
-            row = c.fetchone()
-            conn.close()
-            return row[0] if row else None
-        except:
-            return None
 
     def _get_route_name(self, route_id):
         import sqlite3
@@ -2629,7 +2641,10 @@ class MedicalTransApp(tb.Window):
                         self._show_material_selector(row_index, x_positions[3], y_top)
                     return
 
-        canvas.bind("<Button-1>", on_canvas_click)
+        if hasattr(self, "_preview_click_binding"):
+            canvas.unbind("<Button-1>", self._preview_click_binding)
+
+        self._preview_click_binding = canvas.bind("<Button-1>", on_canvas_click)
 
     def _draw_route_main_canvas(self):
         if not hasattr(self, "route_days") or not self.route_days:
@@ -2647,7 +2662,7 @@ class MedicalTransApp(tb.Window):
         self.route_temp_data[day_key] = rows
 
         route_name = self._get_route_name(self.selected_route_id) or "-"
-        driver = self._get_route_driver(self.selected_route_id) or "-"
+        driver = self.route_driver_names.get(day_key, "-")
         start_hour = self.route_start_hours.get(day_key, "-")
 
         print("🎨 بدء رسم Canvas لـ Route:", route_name)
@@ -2688,8 +2703,11 @@ class MedicalTransApp(tb.Window):
                 text = row_data[5].replace("__note_only__", "").lstrip()
                 lines = text.split("\n") if text.strip() else [""]
                 row_height = max(font_obj.metrics("linespace"), len(lines) * font_obj.metrics("linespace")) + 18
-                canvas.create_rectangle(30, y, total_width, y + row_height, fill="#fff9dc", outline="#cccccc")
-                canvas.create_text(35, y + 6, anchor="nw", text="\n".join(lines), font=font_conf, fill="#000000")
+                note_font = ("Segoe UI", 10, "bold")
+                note_text = "\n".join(lines)
+
+                canvas.create_rectangle(x_positions[0], y, x_positions[-1] + col_widths[-1], y + row_height, fill="#ffffff", outline="#cccccc")
+                canvas.create_text(total_width // 2, y + row_height // 2, anchor="c", text=note_text, font=note_font, fill="#000000")
                 y += row_height
             else:
                 cell_heights = []
@@ -3015,6 +3033,18 @@ class MedicalTransApp(tb.Window):
         import tkinter as tk
 
         canvas = self.route_preview_canvas
+
+        # 🧹 تنظيف أي حدث نقر مرتبط بـ binding سابق (من أي قائمة أخرى)
+        for attr in [
+            "_doctor_selector_binding",
+            "_time_selector_binding",
+            "_lab_selector_binding",
+            "_material_selector_binding"
+        ]:
+            if hasattr(self, attr):
+                canvas.unbind("<Button-1>", getattr(self, attr))
+                delattr(self, attr)
+
         current_date = self.route_days[self.current_route_index]
         day_key = current_date.strftime("%Y-%m-%d")
 
@@ -3126,14 +3156,31 @@ class MedicalTransApp(tb.Window):
 
         self._active_doctor_widget = container
         self._active_doctor_window_id = widget_id
-        canvas.after(100, lambda: setattr(self, "_doctor_selector_binding", 
-            canvas.bind("<Button-1>", close_on_click_outside, add="+")))
+        # 🔁 فك الربط السابق إن وُجد
+        if hasattr(self, "_doctor_selector_binding"):
+            canvas.unbind("<Button-1>", self._doctor_selector_binding)
+            del self._doctor_selector_binding
+
+        # ✅ ربط مباشر بدون تأخير
+        self._doctor_selector_binding = canvas.bind("<Button-1>", close_on_click_outside)
 
     def _show_time_selector(self, row_index, x, y):
         import tkinter as tk
         from tkinter import messagebox
 
         canvas = self.route_preview_canvas
+
+        # 🧹 تنظيف أي حدث نقر مرتبط بـ binding سابق (من أي قائمة أخرى)
+        for attr in [
+            "_doctor_selector_binding",
+            "_time_selector_binding",
+            "_lab_selector_binding",
+            "_material_selector_binding"
+        ]:
+            if hasattr(self, attr):
+                canvas.unbind("<Button-1>", getattr(self, attr))
+                delattr(self, attr)
+
         current_date = self.route_days[self.current_route_index]
         day_key = current_date.strftime("%Y-%m-%d")
 
@@ -3256,8 +3303,13 @@ class MedicalTransApp(tb.Window):
 
         tk.Button(button_frame, text="✔️ تم", command=apply_time, bg="white").pack()
 
-        canvas.after(100, lambda: setattr(self, "_time_selector_binding",
-            canvas.bind("<Button-1>", close_if_click_outside, add="+")))
+        # ✅ فك الربط السابق إن وُجد
+        if hasattr(self, "_time_selector_binding"):
+            canvas.unbind("<Button-1>", self._time_selector_binding)
+            del self._time_selector_binding
+
+        # ✅ ربط مباشر بدون تأخير
+        self._time_selector_binding = canvas.bind("<Button-1>", close_if_click_outside)
 
     def _extract_sort_time(self, time_str):
         import re
@@ -3273,6 +3325,18 @@ class MedicalTransApp(tb.Window):
         import tkinter as tk
 
         canvas = self.route_preview_canvas
+        
+        # 🧹 تنظيف أي حدث نقر مرتبط بـ binding سابق (من أي قائمة أخرى)
+        for attr in [
+            "_doctor_selector_binding",
+            "_time_selector_binding",
+            "_lab_selector_binding",
+            "_material_selector_binding"
+        ]:
+            if hasattr(self, attr):
+                canvas.unbind("<Button-1>", getattr(self, attr))
+                delattr(self, attr)
+
         current_date = self.route_days[self.current_route_index]
         day_key = current_date.strftime("%Y-%m-%d")
 
@@ -3365,13 +3429,31 @@ class MedicalTransApp(tb.Window):
 
         self._active_lab_selector = frame
         self._active_lab_window_id = window_id
-        canvas.after(100, lambda: setattr(self, "_lab_selector_binding",
-            canvas.bind("<Button-1>", close_if_click_outside, add="+")))
+        
+        # ✅ فك الربط السابق إن وُجد
+        if hasattr(self, "_lab_selector_binding"):
+            canvas.unbind("<Button-1>", self._lab_selector_binding)
+            del self._lab_selector_binding
+        
+        # ✅ ربط مباشر بدون تأخير
+        self._lab_selector_binding = canvas.bind("<Button-1>", close_if_click_outside)
 
     def _show_material_selector(self, row_index, x, y):
         import tkinter as tk
 
         canvas = self.route_preview_canvas
+
+        # 🧹 تنظيف أي حدث نقر مرتبط بـ binding سابق (من أي قائمة أخرى)
+        for attr in [
+            "_doctor_selector_binding",
+            "_time_selector_binding",
+            "_lab_selector_binding",
+            "_material_selector_binding"
+        ]:
+            if hasattr(self, attr):
+                canvas.unbind("<Button-1>", getattr(self, attr))
+                delattr(self, attr)
+
         current_date = self.route_days[self.current_route_index]
         day_key = current_date.strftime("%Y-%m-%d")
 
@@ -3442,8 +3524,13 @@ class MedicalTransApp(tb.Window):
 
         # canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
-        canvas.after(100, lambda: setattr(self, "_material_selector_binding",
-            canvas.bind("<Button-1>", close_if_click_outside, add="+")))
+        # ✅ فك الربط السابق إن وُجد
+        if hasattr(self, "_material_selector_binding"):
+            canvas.unbind("<Button-1>", self._material_selector_binding)
+            del self._material_selector_binding
+
+        # ✅ ربط مباشر بدون تأخير
+        self._material_selector_binding = canvas.bind("<Button-1>", close_if_click_outside)
 
     def get_all_doctor_names(self):
         import sqlite3
@@ -3548,10 +3635,39 @@ class MedicalTransApp(tb.Window):
         self._update_notes_from_widgets()
         self._update_route_start_hour()
 
-        if editing_mode and not apply_only:
-            from tkinter import messagebox
-            ask = messagebox.askyesno("تأكيد التعديل", "هل أنت متأكد أنك تريد تعديل هذا الـ Route؟")
-            if not ask:
+        # ✅ تحقق من أن جميع الأيام تحتوي على بداية عمل وسائق
+        for date in self.route_days:
+            day_key = date.strftime("%Y-%m-%d")
+            rows = self.route_temp_data.get(day_key, [])
+            if not rows:
+                continue
+
+            start_hour = self.route_start_hours.get(day_key, "").strip()
+            if not start_hour:
+                self.show_message("warning", f"❌ يرجى تحديد بداية العمل ليوم {day_key}.")
+                return
+
+            driver_name = self.route_driver_names.get(day_key, "").strip()
+            if not driver_name:
+                self.show_message("warning", f"❌ يرجى اختيار السائق ليوم {day_key}.")
+                return
+
+        # ✅ فحص اكتمال الأيام غير العطل (لحفظ فقط)
+        if not apply_only:
+            missing_days = []
+            for date in self.route_days:
+                day_key = date.strftime("%Y-%m-%d")
+                rows = self.route_temp_data.get(day_key, [])
+                if not rows and date.weekday() not in (5, 6):  # استثناء السبت والأحد
+                    missing_days.append(day_key)
+
+            if missing_days:
+                self.show_message("warning", "⚠️ الأيام التالية لا تحتوي على بيانات:\n" + "\n".join(missing_days))
+                return
+
+            # ✅ تأكيد الحفظ
+            msg = "هل أنت متأكد أنك تريد تعديل هذا الـ Route؟" if editing_mode else "هل أنت متأكد أنك تريد حفظ هذا الـ Route؟"
+            if not self.show_custom_confirm("تأكيد الحفظ", msg):
                 return
 
         try:
@@ -3559,16 +3675,13 @@ class MedicalTransApp(tb.Window):
                 c = conn.cursor()
 
                 if editing_mode:
-                    # حذف كافة السجلات المرتبطة بـ route_id
                     c.execute("DELETE FROM routes WHERE id = ?", (self._editing_route_id,))
                     c.execute("DELETE FROM route_days WHERE route_id = ?", (self._editing_route_id,))
                     c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ?", (name, driver))
-                    route_id = self._editing_route_id  # إعادة استخدام نفس route_id
+                    route_id = self._editing_route_id
                 else:
-                    # حذف السجلات السابقة لنفس الاسم والسائق
                     c.execute("DELETE FROM routes WHERE name = ? AND driver = ?", (name, driver))
                     c.execute("DELETE FROM route_tasks WHERE route_name = ? AND driver = ?", (name, driver))
-                    # إنشاء route جديد
                     first_date = self.route_days[0].strftime("%Y-%m-%d")
                     c.execute("""
                         INSERT INTO routes (name, date, driver)
@@ -3583,14 +3696,7 @@ class MedicalTransApp(tb.Window):
                         continue
 
                     start_hour = self.route_start_hours.get(day_key, "").strip()
-                    if not start_hour:
-                        self.show_message("warning", f"❌ يرجى تحديد بداية العمل ليوم {day_key}.")
-                        return
-
                     driver_name = self.route_driver_names.get(day_key, "").strip()
-                    if not driver_name:
-                        self.show_message("warning", f"❌ يرجى اختيار السائق ليوم {day_key}.")
-                        return
 
                     day_data = {
                         "rows": rows,
@@ -3630,7 +3736,7 @@ class MedicalTransApp(tb.Window):
                 self.show_message("success", "✅ تم حفظ Route بنجاح.")
             else:
                 self._refresh_route_cards()
-                self.show_message("info", "✅ تم تطبيق التغييرات بنجاح.")
+                self.show_message("info", "✅ تم تطبيق التغييرات.\nيمكنك المتابعة أو الضغط على 'حفظ' لاحقًا.")
 
         except Exception as e:
             self.show_message("error", f"حدث خطأ أثناء الحفظ:\n{e}")
