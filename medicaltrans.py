@@ -3044,7 +3044,66 @@ class MedicalTransApp(tb.Window):
         text_area.bind("<KeyRelease>", auto_resize)
         auto_resize()
 
+    def _close_all_selectors(self):
+        # Doctor
+        if hasattr(self, "_active_doctor_widget"):
+            try:
+                self.route_preview_canvas.delete(self._active_doctor_window_id)
+            except Exception:
+                pass
+            del self._active_doctor_widget
+            del self._active_doctor_window_id
+        if hasattr(self, "_doctor_selector_binding"):
+            try:
+                self.route_preview_canvas.unbind("<Button-1>", self._doctor_selector_binding)
+            except Exception:
+                pass
+            del self._doctor_selector_binding
+        # Time
+        if hasattr(self, "_active_time_selector"):
+            try:
+                self.route_preview_canvas.delete(self._active_time_window_id)
+            except Exception:
+                pass
+            del self._active_time_selector
+            del self._active_time_window_id
+        if hasattr(self, "_time_selector_binding"):
+            try:
+                self.route_preview_canvas.unbind("<Button-1>", self._time_selector_binding)
+            except Exception:
+                pass
+            del self._time_selector_binding
+        # Lab
+        if hasattr(self, "_active_lab_selector"):
+            try:
+                self.route_preview_canvas.delete(self._active_lab_window_id)
+            except Exception:
+                pass
+            del self._active_lab_selector
+            del self._active_lab_window_id
+        if hasattr(self, "_lab_selector_binding"):
+            try:
+                self.route_preview_canvas.unbind("<Button-1>", self._lab_selector_binding)
+            except Exception:
+                pass
+            del self._lab_selector_binding
+        # Material
+        if hasattr(self, "_active_material_selector"):
+            try:
+                self.route_preview_canvas.delete(self._active_material_window_id)
+            except Exception:
+                pass
+            del self._active_material_selector
+            del self._active_material_window_id
+        if hasattr(self, "_material_selector_binding"):
+            try:
+                self.route_preview_canvas.unbind("<Button-1>", self._material_selector_binding)
+            except Exception:
+                pass
+            del self._material_selector_binding
+
     def _show_doctor_selector(self, row_index, x, y):
+        self._close_all_selectors()
         print(f"[DEBUG] _show_doctor_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
 
@@ -3195,6 +3254,7 @@ class MedicalTransApp(tb.Window):
         canvas.after(10, bind_close)
 
     def _show_time_selector(self, row_index, x, y):
+        self._close_all_selectors()
         print(f"[DEBUG] _show_time_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
         from tkinter import messagebox
@@ -3364,6 +3424,7 @@ class MedicalTransApp(tb.Window):
         canvas.after(10, bind_close)
 
     def _show_lab_selector(self, row_index, x, y):
+        self._close_all_selectors()
         print(f"[DEBUG] _show_lab_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
 
@@ -3504,6 +3565,7 @@ class MedicalTransApp(tb.Window):
         canvas.after(10, bind_close)        
 
     def _show_material_selector(self, row_index, x, y):
+        self._close_all_selectors()
         print(f"[DEBUG] _show_material_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
 
