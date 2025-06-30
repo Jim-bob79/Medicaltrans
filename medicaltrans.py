@@ -2575,6 +2575,7 @@ class MedicalTransApp(tb.Window):
 
         def on_canvas_click(event):
             ex, ey = event.x, event.y
+            print(f"[DEBUG] on_canvas_click: x={ex}, y={ey}")
 
             for row_index, y_top in enumerate(self._row_y_positions):
                 row_data = list(self.route_temp_data[self.route_days[self.current_route_index].strftime("%Y-%m-%d")][row_index])
@@ -2588,15 +2589,16 @@ class MedicalTransApp(tb.Window):
 
                     # ✅ السماح بالتحديد فقط من العمود الأيسر
                     if y_top <= ey <= y_top + row_height and 0 <= ex <= 30:
+                        print(f"[DEBUG] on_canvas_click: selected note row={row_index}")
                         if getattr(self, "_selected_route_row_index", None) == row_index:
                             self._selected_route_row_index = None
                         else:
                             self._selected_route_row_index = row_index
                         self._draw_route_preview()
                         return
-
+    
                     continue  # لا ننفذ أي شيء آخر على صف الملاحظات
-
+    
                 else:
                     # صف عادي
                     cell_heights = []
@@ -2621,6 +2623,7 @@ class MedicalTransApp(tb.Window):
 
                 if y_top <= ey <= y_top + row_height:
                     if 0 <= ex <= 30:
+                        print(f"[DEBUG] on_canvas_click: select row button row={row_index}")
                         # ✅ عمود التحديد
                         if getattr(self, "_selected_route_row_index", None) == row_index:
                             self._selected_route_row_index = None
@@ -2632,17 +2635,25 @@ class MedicalTransApp(tb.Window):
                     # ✅ باقي الأعمدة
                     x_positions = self._x_positions
                     if x_positions[0] <= ex <= x_positions[1]:
+                        print(f"[DEBUG] on_canvas_click: doctor selector row={row_index}")
                         self._show_doctor_selector(row_index, x_positions[0], y_top)
                     elif x_positions[1] <= ex <= x_positions[2]:
+                        print(f"[DEBUG] on_canvas_click: time selector row={row_index}")
                         self._show_time_selector(row_index, x_positions[1], y_top)
                     elif x_positions[2] <= ex <= x_positions[3]:
+                        print(f"[DEBUG] on_canvas_click: lab selector row={row_index}")
                         self._show_lab_selector(row_index, x_positions[2], y_top)
                     elif x_positions[3] <= ex <= x_positions[4]:
+                        print(f"[DEBUG] on_canvas_click: material selector row={row_index}")
                         self._show_material_selector(row_index, x_positions[3], y_top)
                     return
 
         if hasattr(self, "_preview_click_binding"):
-            canvas.unbind("<Button-1>", self._preview_click_binding)
+            try:
+                canvas.unbind("<Button-1>", self._preview_click_binding)
+            except Exception:
+                pass
+            del self._preview_click_binding
 
         self._preview_click_binding = canvas.bind("<Button-1>", on_canvas_click)
 
@@ -2867,7 +2878,7 @@ class MedicalTransApp(tb.Window):
                     fill="red",
                     tags=(note_cell_tag,)
                 )
-        
+    
                 if col_widths[i] >= 40:
                     icon_y = y + row_height // 2
                     canvas.create_text(
@@ -2881,7 +2892,7 @@ class MedicalTransApp(tb.Window):
                 canvas.tag_bind(
                     note_cell_tag, "<Button-1>",
                     lambda e, rx=row_index, xx=x, yy=y, ww=col_widths[i]:
-                        self._edit_notes_in_cell(rx, xx, yy, ww)
+                        (print(f"[DEBUG] Clicked ملاحظات/مواد row={rx} x={xx} y={yy}"), self._edit_notes_in_cell(rx, xx, yy, ww))
                 )
             else:
                 canvas.create_text(
@@ -2896,24 +2907,28 @@ class MedicalTransApp(tb.Window):
                 if i == 0:
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
-                        lambda e, rx=row_index, xx=x, yy=y: self._show_doctor_selector(rx, xx, yy)
+                        lambda e, rx=row_index, xx=x, yy=y:
+                            (print(f"[DEBUG] Clicked الطبيب/المخبر row={rx} x={xx} y={yy}"), self._show_doctor_selector(rx, xx, yy))
                     )
                 elif i == 1:
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
-                        lambda e, rx=row_index, xx=x, yy=y: self._show_time_selector(rx, xx, yy)
+                        lambda e, rx=row_index, xx=x, yy=y:
+                            (print(f"[DEBUG] Clicked Zeit row={rx} x={xx} y={yy}"), self._show_time_selector(rx, xx, yy))
                     )
                 elif i == 2:
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
-                        lambda e, rx=row_index, xx=x, yy=y: self._show_lab_selector(rx, xx, yy)
+                        lambda e, rx=row_index, xx=x, yy=y:
+                            (print(f"[DEBUG] Clicked المخبر row={rx} x={xx} y={yy}"), self._show_lab_selector(rx, xx, yy))
                     )
                 elif i == 3:
                     canvas.tag_bind(
                         cell_tag, "<Button-1>",
-                        lambda e, rx=row_index, xx=x, yy=y: self._show_material_selector(rx, xx, yy)
+                        lambda e, rx=row_index, xx=x, yy=y:
+                            (print(f"[DEBUG] Clicked Beschreibung row={rx} x={xx} y={yy}"), self._show_material_selector(rx, xx, yy))
                     )
-    
+
         return row_height
 
     def _draw_note_row(self, canvas, row_index, y):
@@ -3030,6 +3045,7 @@ class MedicalTransApp(tb.Window):
         auto_resize()
 
     def _show_doctor_selector(self, row_index, x, y):
+        print(f"[DEBUG] _show_doctor_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
 
         canvas = self.route_preview_canvas
@@ -3042,7 +3058,10 @@ class MedicalTransApp(tb.Window):
             "_material_selector_binding"
         ]:
             if hasattr(self, attr):
-                canvas.unbind("<Button-1>", getattr(self, attr))
+                try:
+                    canvas.unbind("<Button-1>", getattr(self, attr))
+                except Exception:
+                    pass
                 delattr(self, attr)
 
         current_date = self.route_days[self.current_route_index]
@@ -3098,6 +3117,7 @@ class MedicalTransApp(tb.Window):
 
         # إغلاق عند النقر خارجًا
         def close_on_click_outside(event):
+            print("[DEBUG] close_on_click_outside from doctor selector")
             if hasattr(self, "_active_doctor_widget") and hasattr(self, "_active_doctor_window_id"):
                 x_click, y_click = event.x, event.y
                 bbox = canvas.bbox(self._active_doctor_window_id)
@@ -3111,13 +3131,17 @@ class MedicalTransApp(tb.Window):
                 self._draw_route_preview()
                 # فك الربط بعد الإغلاق
                 if hasattr(self, "_doctor_selector_binding"):
-                    canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                    try:
+                        canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                    except Exception:
+                        pass
                     del self._doctor_selector_binding
 
         # canvas.bind("<Button-1>", close_on_click_outside, add="+")
-
+    
         def on_select(event=None):
             selected = listbox.get("anchor").strip()
+            print(f"[DEBUG] doctor selector selected: {selected}")
             if not selected:
                 return
             elif selected == special_delete_option:
@@ -3127,12 +3151,12 @@ class MedicalTransApp(tb.Window):
                 doctor = self.get_doctor_by_name(name)
                 if doctor:
                     row = (
-                        doctor["name"],         # الطبيب / المخبر
-                        doctor["time"],         # الوقت
-                        doctor["lab"],          # المخبر
-                        "",                     # ✅ نترك "Beschreibung" فارغًا ← المستخدم يختار المواد لاحقًا
-                        doctor["address"],      # العنوان
-                        ""                      # ✅ ملاحظات/مواد فارغة
+                        doctor["name"],
+                        doctor["time"],
+                        doctor["lab"],
+                        "",
+                        doctor["address"],
+                        ""
                     )
                     self.route_temp_data[day_key][row_index] = row
             elif selected.startswith("🧪 "):
@@ -3146,7 +3170,10 @@ class MedicalTransApp(tb.Window):
             del self._active_doctor_window_id
             self._draw_route_preview()
             if hasattr(self, "_doctor_selector_binding"):
-                canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                try:
+                    canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                except Exception:
+                    pass
                 del self._doctor_selector_binding
 
         listbox.bind("<Return>", on_select)
@@ -3157,19 +3184,23 @@ class MedicalTransApp(tb.Window):
         self._active_doctor_widget = container
         self._active_doctor_window_id = widget_id
         # 🔁 فك الربط السابق إن وُجد
-        if hasattr(self, "_doctor_selector_binding"):
-            canvas.unbind("<Button-1>", self._doctor_selector_binding)
-            del self._doctor_selector_binding
-
-        # ✅ ربط مباشر بدون تأخير
-        self._doctor_selector_binding = canvas.bind("<Button-1>", close_on_click_outside)
+        def bind_close():
+            if hasattr(self, "_doctor_selector_binding"):
+                try:
+                    canvas.unbind("<Button-1>", self._doctor_selector_binding)
+                except Exception:
+                    pass
+                del self._doctor_selector_binding
+            self._doctor_selector_binding = canvas.bind("<Button-1>", close_on_click_outside)
+        canvas.after(10, bind_close)
 
     def _show_time_selector(self, row_index, x, y):
+        print(f"[DEBUG] _show_time_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
         from tkinter import messagebox
 
         canvas = self.route_preview_canvas
-
+    
         # 🧹 تنظيف أي حدث نقر مرتبط بـ binding سابق (من أي قائمة أخرى)
         for attr in [
             "_doctor_selector_binding",
@@ -3178,7 +3209,10 @@ class MedicalTransApp(tb.Window):
             "_material_selector_binding"
         ]:
             if hasattr(self, attr):
-                canvas.unbind("<Button-1>", getattr(self, attr))
+                try:
+                    canvas.unbind("<Button-1>", getattr(self, attr))
+                except Exception:
+                    pass
                 delattr(self, attr)
 
         current_date = self.route_days[self.current_route_index]
@@ -3236,7 +3270,8 @@ class MedicalTransApp(tb.Window):
         button_frame = tk.Frame(frame, bg="white")
         button_frame.pack(fill="x", pady=4)
 
-        def close_if_click_outside(event):
+        def close_on_click_outside(event):
+            print("[DEBUG] close_on_click_outside from time selector")
             if hasattr(self, "_active_time_window_id"):
                 bbox = canvas.bbox(self._active_time_window_id)
                 if bbox:
@@ -3249,10 +3284,14 @@ class MedicalTransApp(tb.Window):
                 self._draw_route_preview()
                 # فك الربط بعد الإغلاق
                 if hasattr(self, "_time_selector_binding"):
-                    canvas.unbind("<Button-1>", self._time_selector_binding)
+                    try:
+                        canvas.unbind("<Button-1>", self._time_selector_binding)
+                    except Exception:
+                        pass
                     del self._time_selector_binding
 
         def apply_time():
+            print(f"[DEBUG] apply_time called row_index={row_index}")
             prefix = selected_option.get()
             parent_window = canvas.winfo_toplevel()
 
@@ -3298,34 +3337,38 @@ class MedicalTransApp(tb.Window):
             self._draw_route_preview()
 
             if hasattr(self, "_time_selector_binding"):
-                canvas.unbind("<Button-1>", self._time_selector_binding)
+                try:
+                    canvas.unbind("<Button-1>", self._time_selector_binding)
+                except Exception:
+                    pass
                 del self._time_selector_binding
 
         tk.Button(button_frame, text="✔️ تم", command=apply_time, bg="white").pack()
 
         # ✅ فك الربط السابق إن وُجد
         if hasattr(self, "_time_selector_binding"):
-            canvas.unbind("<Button-1>", self._time_selector_binding)
+            try:
+                canvas.unbind("<Button-1>", self._time_selector_binding)
+            except Exception:
+                pass
             del self._time_selector_binding
 
-        # ✅ ربط مباشر بدون تأخير
-        self._time_selector_binding = canvas.bind("<Button-1>", close_if_click_outside)
-
-    def _extract_sort_time(self, time_str):
-        import re
-        if not time_str or not isinstance(time_str, str):
-            return (99, 99)  # ضع غير المحددين في النهاية
-
-        match = re.search(r"(\d{2}):(\d{2})", time_str)
-        if match:
-            return tuple(map(int, match.groups()))
-        return (99, 99)
+        def bind_close():
+            if hasattr(self, "_time_selector_binding"):
+                try:
+                    canvas.unbind("<Button-1>", self._time_selector_binding)
+                except Exception:
+                    pass
+                del self._time_selector_binding
+            self._time_selector_binding = canvas.bind("<Button-1>", close_on_click_outside)
+        canvas.after(10, bind_close)
 
     def _show_lab_selector(self, row_index, x, y):
+        print(f"[DEBUG] _show_lab_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
 
         canvas = self.route_preview_canvas
-        
+    
         # 🧹 تنظيف أي حدث نقر مرتبط بـ binding سابق (من أي قائمة أخرى)
         for attr in [
             "_doctor_selector_binding",
@@ -3334,7 +3377,10 @@ class MedicalTransApp(tb.Window):
             "_material_selector_binding"
         ]:
             if hasattr(self, attr):
-                canvas.unbind("<Button-1>", getattr(self, attr))
+                try:
+                    canvas.unbind("<Button-1>", getattr(self, attr))
+                except Exception:
+                    pass
                 delattr(self, attr)
 
         current_date = self.route_days[self.current_route_index]
@@ -3390,6 +3436,7 @@ class MedicalTransApp(tb.Window):
 
         # عند الاختيار
         def on_select(event=None):
+            print(f"[DEBUG] lab selector selected: {listbox.curselection()}")
             if not listbox.curselection():
                 return
             selected_lab = listbox.get(listbox.curselection())
@@ -3402,14 +3449,18 @@ class MedicalTransApp(tb.Window):
             self._draw_route_preview()
             # فك الربط بعد الإغلاق
             if hasattr(self, "_lab_selector_binding"):
-                canvas.unbind("<Button-1>", self._lab_selector_binding)
+                try:
+                    canvas.unbind("<Button-1>", self._lab_selector_binding)
+                except Exception:
+                    pass
                 del self._lab_selector_binding
 
         listbox.bind("<Double-Button-1>", on_select)
         listbox.bind("<Return>", on_select)
 
         # إغلاق عند النقر خارجًا
-        def close_if_click_outside(event):
+        def close_on_click_outside(event):
+            print("[DEBUG] close_on_click_outside from lab selector")
             if hasattr(self, "_active_lab_window_id"):
                 bbox = canvas.bbox(self._active_lab_window_id)
                 if bbox:
@@ -3422,23 +3473,38 @@ class MedicalTransApp(tb.Window):
                 self._draw_route_preview()
                 # فك الربط بعد الإغلاق
                 if hasattr(self, "_lab_selector_binding"):
-                    canvas.unbind("<Button-1>", self._lab_selector_binding)
+                    try:
+                        canvas.unbind("<Button-1>", self._lab_selector_binding)
+                    except Exception:
+                        pass
                     del self._lab_selector_binding
 
         # canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
         self._active_lab_selector = frame
         self._active_lab_window_id = window_id
-        
+    
         # ✅ فك الربط السابق إن وُجد
         if hasattr(self, "_lab_selector_binding"):
-            canvas.unbind("<Button-1>", self._lab_selector_binding)
+            try:
+                canvas.unbind("<Button-1>", self._lab_selector_binding)
+            except Exception:
+                pass
             del self._lab_selector_binding
-        
+    
         # ✅ ربط مباشر بدون تأخير
-        self._lab_selector_binding = canvas.bind("<Button-1>", close_if_click_outside)
+        def bind_close():
+            if hasattr(self, "_lab_selector_binding"):
+                try:
+                    canvas.unbind("<Button-1>", self._lab_selector_binding)
+                except Exception:
+                    pass
+                del self._lab_selector_binding
+            self._lab_selector_binding = canvas.bind("<Button-1>", close_on_click_outside)
+        canvas.after(10, bind_close)        
 
     def _show_material_selector(self, row_index, x, y):
+        print(f"[DEBUG] _show_material_selector called row_index={row_index}, x={x}, y={y}")
         import tkinter as tk
 
         canvas = self.route_preview_canvas
@@ -3451,7 +3517,10 @@ class MedicalTransApp(tb.Window):
             "_material_selector_binding"
         ]:
             if hasattr(self, attr):
-                canvas.unbind("<Button-1>", getattr(self, attr))
+                try:
+                    canvas.unbind("<Button-1>", getattr(self, attr))
+                except Exception:
+                    pass
                 delattr(self, attr)
 
         current_date = self.route_days[self.current_route_index]
@@ -3490,6 +3559,7 @@ class MedicalTransApp(tb.Window):
             vars.append((item, var))
 
         def apply_selection():
+            print(f"[DEBUG] apply_selection in material selector row_index={row_index}")
             selected_items = [item for item, var in vars if var.get()]
             current_row = list(self.route_temp_data[day_key][row_index])
             current_row[3] = ", ".join(selected_items)
@@ -3498,15 +3568,19 @@ class MedicalTransApp(tb.Window):
             del self._active_material_selector
             del self._active_material_window_id
             self._draw_route_preview()
-
+    
             if hasattr(self, "_material_selector_binding"):
-                canvas.unbind("<Button-1>", self._material_selector_binding)
+                try:
+                    canvas.unbind("<Button-1>", self._material_selector_binding)
+                except Exception:
+                    pass
                 del self._material_selector_binding
 
         btn = tk.Button(frame, text="✔️ تم", command=apply_selection, bg="white")
         btn.pack(pady=4)
 
-        def close_if_click_outside(event):
+        def close_on_click_outside(event):
+            print("[DEBUG] close_on_click_outside from material selector")
             if hasattr(self, "_active_material_window_id"):
                 bbox = canvas.bbox(self._active_material_window_id)
                 if bbox:
@@ -3519,18 +3593,42 @@ class MedicalTransApp(tb.Window):
                 self._draw_route_preview()
                 # فك الربط بعد الإغلاق
                 if hasattr(self, "_material_selector_binding"):
-                    canvas.unbind("<Button-1>", self._material_selector_binding)
+                    try:
+                        canvas.unbind("<Button-1>", self._material_selector_binding)
+                    except Exception:
+                        pass
                     del self._material_selector_binding
 
         # canvas.bind("<Button-1>", close_if_click_outside, add="+")
 
         # ✅ فك الربط السابق إن وُجد
         if hasattr(self, "_material_selector_binding"):
-            canvas.unbind("<Button-1>", self._material_selector_binding)
+            try:
+                canvas.unbind("<Button-1>", self._material_selector_binding)
+            except Exception:
+                pass
             del self._material_selector_binding
 
         # ✅ ربط مباشر بدون تأخير
-        self._material_selector_binding = canvas.bind("<Button-1>", close_if_click_outside)
+        def bind_close():
+            if hasattr(self, "_material_selector_binding"):
+                try:
+                    canvas.unbind("<Button-1>", self._material_selector_binding)
+                except Exception:
+                    pass
+                del self._material_selector_binding
+            self._material_selector_binding = canvas.bind("<Button-1>", close_on_click_outside)
+        canvas.after(10, bind_close)
+    
+    def _extract_sort_time(self, time_str):
+        import re
+        if not time_str or not isinstance(time_str, str):
+            return (99, 99)  # ضع غير المحددين في النهاية
+
+        match = re.search(r"(\d{2}):(\d{2})", time_str)
+        if match:
+            return tuple(map(int, match.groups()))
+        return (99, 99)
 
     def get_all_doctor_names(self):
         import sqlite3
