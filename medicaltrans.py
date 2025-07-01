@@ -7008,166 +7008,248 @@ class MedicalTransApp(tb.Window):
     def _build_calendar_tab(self):
         frame = tb.Frame(self.content_frame, padding=20)
 
-        # ===== صف علوي يحتوي على: إضافة حدث تقويمي + إضافة إجازة =====
+        # ==== الحاوية العلوية (3 إطارات) ====
         top_row = tb.Frame(frame)
-        top_row.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
-        top_row.columnconfigure(0, weight=1)
-        top_row.columnconfigure(1, weight=1)
+        top_row.grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
+        for i in range(3):
+            top_row.columnconfigure(i, weight=1, uniform="calendar")
         top_row.rowconfigure(0, weight=1)
 
-        # ===== إطار إضافة حدث تقويمي =====
+        # ========== إطار إضافة حدث تقويمي ==========
         calendar_event_frame = tb.LabelFrame(top_row, text="إضافة حدث تقويمي", padding=10)
-        calendar_event_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-
-        # === السطر الأول: نوع الحدث + التواريخ ===
-        row0_frame = tb.Frame(calendar_event_frame)
-        row0_frame.pack(fill="x", pady=5)
+        calendar_event_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=0)
 
         # نوع الحدث
-        ttk.Label(row0_frame, text="نوع الحدث أو العطلة:").pack(side="left", padx=(5, 5))
-        self.event_type_combo = ttk.Combobox(row0_frame, values=AUSTRIAN_HOLIDAYS, state="readonly", width=30, justify="left")
-        self.event_type_combo.pack(side="left", padx=(0, 15))
-
-        # من
-        ttk.Label(row0_frame, text="من:").pack(side="left", padx=(5, 2))
-        self.start_date_entry = CustomDatePicker(row0_frame)
-        self.start_date_entry.entry.configure(justify="left")
-        self.start_date_entry.pack(side="left", padx=(0, 10))
-
-        # إلى
-        ttk.Label(row0_frame, text="إلى:").pack(side="left", padx=(5, 2))
-        self.end_date_entry = CustomDatePicker(row0_frame)
-        self.end_date_entry.entry.configure(justify="left")
-        self.end_date_entry.pack(side="left", padx=(0, 10))
-
-        # === السطر الثاني: الوصف / الملاحظات ===
-        row1_frame = tb.Frame(calendar_event_frame)
-        row1_frame.pack(fill="x", pady=5)
-
-        ttk.Label(row1_frame, text="الوصف / الملاحظات:").grid(row=0, column=0, sticky="nw", padx=(5, 5), pady=(2, 0))
-        self.event_desc_text = tb.Text(row1_frame, width=91, height=3, wrap="word")
-        self.event_desc_text.grid(row=0, column=1, sticky="ew", padx=(0, 10))
-
-        # row1_frame.columnconfigure(1, weight=1)  # للسماح بتمدد مربع النص
-
-        self.event_desc_text.tag_configure("left", justify="left")
-        self.event_desc_text.insert("1.0", "")
-        self.event_desc_text.tag_add("left", "1.0", "end")
-
-        # === السطر الثالث: زر الحفظ ===
-        row2_frame = tb.Frame(calendar_event_frame)
-        row2_frame.pack(fill="x", pady=(5, 10))
-
-        save_btn = ttk.Button(
-            row2_frame,
-            text="💾 حفظ",
-            style="Green.TButton",
-            command=self._save_calendar_event
+        ttk.Label(calendar_event_frame, text="نوع الحدث أو العطلة:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.event_type_combo = ttk.Combobox(
+            calendar_event_frame, values=AUSTRIAN_HOLIDAYS, state="readonly", width=26, justify="left"
         )
-        save_btn.pack(anchor="center", ipadx=20)
+        self.event_type_combo.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5, pady=2)
 
-        # ===== إطار إضافة إجازة =====
+        # من + إلى (في نفس الصف)
+        ttk.Label(calendar_event_frame, text="من:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.start_date_entry = CustomDatePicker(calendar_event_frame)
+        self.start_date_entry.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        ttk.Label(calendar_event_frame, text="إلى:").grid(row=1, column=2, sticky="w", padx=5, pady=2)
+        self.end_date_entry = CustomDatePicker(calendar_event_frame)
+        self.end_date_entry.grid(row=1, column=3, sticky="w", padx=5, pady=2)
+
+        # الملاحظات في صف مستقل
+        ttk.Label(calendar_event_frame, text="الوصف / الملاحظات:").grid(row=2, column=0, sticky="nw", padx=5, pady=2)
+        self.event_desc_text = tb.Text(calendar_event_frame, width=36, height=1, wrap="word")
+        self.event_desc_text.grid(row=2, column=1, columnspan=3, sticky="ew", padx=5, pady=2)
+        calendar_save_btn = ttk.Button(
+            calendar_event_frame, text="💾 حفظ", style="Green.TButton", command=self._save_calendar_event
+        )
+        calendar_save_btn.grid(row=3, column=0, columnspan=4, pady=6)
+
+        # ========== إطار إضافة إجازة ==========
         vacation_frame = tb.LabelFrame(top_row, text="إضافة إجازة", padding=10)
-        vacation_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-
-        ttk.Label(vacation_frame, text="النوع:").grid(row=0, column=0, sticky="w", padx=(5, 2))
-        self.vac_type = ttk.Combobox(vacation_frame, values=["سائق", "طبيب"], state="readonly", width=15, height=10, justify="left")
-        self.vac_type.grid(row=0, column=1, padx=5, pady=5)
+        vacation_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=0)
+        # النوع + الاسم (نفس الصف)
+        ttk.Label(vacation_frame, text="النوع:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.vac_type = ttk.Combobox(
+            vacation_frame, values=["سائق", "طبيب"], state="readonly", width=13, justify="left"
+        )
+        self.vac_type.grid(row=0, column=1, sticky="w", padx=5, pady=2)
         self.vac_type.bind("<<ComboboxSelected>>", self._load_vacation_names)
-
-        ttk.Label(vacation_frame, text="الاسم:").grid(row=0, column=2, sticky="w", padx=(5, 2))
-        self.vac_name = ttk.Combobox(vacation_frame, values=[""], state="readonly", width=30, height=10, justify="left")
-        self.vac_name.grid(row=0, column=3, padx=5, pady=5)
-
-        ttk.Label(vacation_frame, text="من:").grid(row=0, column=4, sticky="w", padx=(5, 2))
+        ttk.Label(vacation_frame, text="الاسم:").grid(row=0, column=2, sticky="w", padx=5, pady=2)
+        self.vac_name = ttk.Combobox(
+            vacation_frame, values=[""], state="readonly", width=26, justify="left"
+        )
+        self.vac_name.grid(row=0, column=3, sticky="w", padx=5, pady=2)
+        # من + إلى (نفس الصف)
+        ttk.Label(vacation_frame, text="من:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         self.vac_start = CustomDatePicker(vacation_frame)
-        self.vac_start.grid(row=0, column=5, padx=5, pady=5)
-
-        ttk.Label(vacation_frame, text="إلى:").grid(row=0, column=6, sticky="w", padx=(5, 2))
+        self.vac_start.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        ttk.Label(vacation_frame, text="إلى:").grid(row=1, column=2, sticky="w", padx=5, pady=2)
         self.vac_end = CustomDatePicker(vacation_frame)
-        self.vac_end.grid(row=0, column=7, padx=5, pady=5)
+        self.vac_end.grid(row=1, column=3, sticky="w", padx=5, pady=2)
+        # الملاحظات في صف مستقل
+        ttk.Label(vacation_frame, text="الوصف / الملاحظات:").grid(row=2, column=0, sticky="nw", padx=5, pady=2)
+        self.vac_note_text = tb.Text(vacation_frame, width=36, height=1, wrap="word")
+        self.vac_note_text.grid(row=2, column=1, columnspan=3, sticky="ew", padx=5, pady=2)
+        vac_save_btn = ttk.Button(
+            vacation_frame, text="💾 حفظ", style="Orange.TButton", command=self._save_vacation
+        )
+        vac_save_btn.grid(row=3, column=0, columnspan=4, pady=6)
 
-        btns_frame = tb.Frame(vacation_frame)
-        btns_frame.grid(row=2, column=0, columnspan=8, pady=10)
+        # ========== إطار Extra Abholen ==========
+        self._build_extra_abholen_frame(top_row)
+        extra_abholen_frame = tb.LabelFrame(top_row, text="Extra Abholen", padding=10)
+        extra_abholen_frame.grid(row=0, column=2, sticky="nsew", padx=(5, 0), pady=0)
 
-        inner_btns = tb.Frame(btns_frame)
-        inner_btns.pack(anchor="center")
-        # === السطر الثاني: الوصف / الملاحظات في الإجازة ===
-        row1_frame_vac = tb.Frame(vacation_frame)
-        row1_frame_vac.grid(row=1, column=0, columnspan=8, sticky="ew", pady=5)
+        # اسم الطبيب: Combobox ببحث ذكي وفتح تلقائي عند الفوكس
+        import sqlite3
+        ttk.Label(extra_abholen_frame, text="اسم الطبيب:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        with sqlite3.connect("medicaltrans.db") as conn:
+            c = conn.cursor()
+            c.execute("SELECT name FROM doctors WHERE (name IS NOT NULL AND name != '') ORDER BY name ASC")
+            self.extra_all_doctors = [row[0] for row in c.fetchall()]
 
-        ttk.Label(row1_frame_vac, text="الوصف / الملاحظات:").grid(row=0, column=0, sticky="nw", padx=(5, 5), pady=(2, 0))
-        self.vac_note_text = tb.Text(row1_frame_vac, width=70, height=3, wrap="word")
-        self.vac_note_text.grid(row=0, column=1, sticky="ew", padx=(0, 10))
-        row1_frame_vac.columnconfigure(1, weight=1)
+        self.extra_doctor_var = tk.StringVar()
+        self.extra_doctor_entry = ttk.Entry(extra_abholen_frame, textvariable=self.extra_doctor_var, width=26)
+        self.extra_doctor_entry.grid(row=0, column=1, columnspan=5, sticky="ew", padx=5, pady=2)
+        self.extra_doctor_listbox = tk.Listbox(extra_abholen_frame, height=5)
+        self.extra_doctor_listbox.grid_forget()
 
-        self.vac_note_text.tag_configure("left", justify="left")
-        self.vac_note_text.insert("1.0", "")
-        self.vac_note_text.tag_add("left", "1.0", "end")
+        def show_doctor_suggestions(event=None):
+            typed = self.extra_doctor_var.get().strip().lower()
+            filtered = [name for name in self.extra_all_doctors if typed in name.lower()] if typed else self.extra_all_doctors
+            if not filtered:
+                self.extra_doctor_listbox.grid_forget()
+                return
+            self.extra_doctor_listbox.delete(0, tk.END)
+            for name in filtered:
+                self.extra_doctor_listbox.insert(tk.END, name)
+            row = self.extra_doctor_entry.grid_info()["row"]
+            self.extra_doctor_listbox.grid(row=row+1, column=1, columnspan=5, sticky="ew", padx=5)
+            self.extra_doctor_listbox.lift()
 
-        ttk.Button(
-            inner_btns,
-            text="💾 حفظ",
-            style="Orange.TButton",
-            command=self._save_vacation
-        ).pack(side="left", padx=10, ipadx=20)
+        def hide_doctor_suggestions(event=None):
+            self.after(100, lambda: self.extra_doctor_listbox.grid_forget())
+
+        def select_doctor_from_listbox(event=None):
+            selection = self.extra_doctor_listbox.curselection()
+            if selection:
+                name = self.extra_doctor_listbox.get(selection[0])
+                self.extra_doctor_var.set(name)
+            self.extra_doctor_listbox.grid_forget()
+
+        self.extra_doctor_entry.bind("<KeyRelease>", show_doctor_suggestions)
+        self.extra_doctor_entry.bind("<FocusOut>", hide_doctor_suggestions)
+        self.extra_doctor_listbox.bind("<ButtonRelease-1>", select_doctor_from_listbox)
+
+        # الوقت + التاريخ في نفس الصف مع تقريب عناصر الوقت
+        ttk.Label(extra_abholen_frame, text="Zeit:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        zeit_options = ["bis", "von - bis", "ab", "nach Anruf", "Anschl."]
+        self.extra_time_combo = ttk.Combobox(
+        extra_abholen_frame, values=zeit_options, state="readonly", width=8
+        )
+        self.extra_time_combo.grid(row=1, column=1, sticky="w", padx=(5, 1), pady=2)
+        self.extra_time_combo.set(zeit_options[0])
+        self.extra_time_from = ttk.Combobox(
+            extra_abholen_frame,
+            values=[f"{h:02d}:{m:02d}" for h in range(7, 18) for m in (0, 30)],
+            width=7, state="readonly"
+        )
+        self.extra_time_from.grid(row=1, column=2, sticky="w", padx=(1, 1), pady=2)
+        self.extra_time_from.set("10:00")
+        self.extra_time_to = ttk.Combobox(
+            extra_abholen_frame,
+            values=[f"{h:02d}:{m:02d}" for h in range(7, 18) for m in (0, 30)],
+            width=7, state="readonly"
+        )
+        self.extra_time_to.grid(row=1, column=3, sticky="w", padx=(1, 1), pady=2)
+        self.extra_time_to.set("11:00")
+        def _on_extra_time_change(event=None):
+            typ = self.extra_time_combo.get()
+            if typ == "von - bis":
+                self.extra_time_from.grid()
+                self.extra_time_to.grid()
+            elif typ in ("bis", "ab"):
+                self.extra_time_from.grid()
+                self.extra_time_to.grid_remove()
+            else:
+                self.extra_time_from.grid_remove()
+                self.extra_time_to.grid_remove()
+        self.extra_time_combo.bind("<<ComboboxSelected>>", _on_extra_time_change)
+        _on_extra_time_change()
+
+        # التاريخ بجانب الوقت
+        ttk.Label(extra_abholen_frame, text="التاريخ:").grid(row=1, column=4, sticky="w", padx=(5, 2), pady=2)
+        self.extra_date_picker = CustomDatePicker(extra_abholen_frame)
+        self.extra_date_picker.grid(row=1, column=5, sticky="w", padx=2, pady=2)
+
+        # الملاحظات في صف مستقل
+        ttk.Label(extra_abholen_frame, text="ملاحظات:").grid(row=2, column=0, sticky="nw", padx=5, pady=2)
+        self.extra_notes_text = tb.Text(extra_abholen_frame, width=36, height=1, wrap="word")
+        self.extra_notes_text.grid(row=2, column=1, columnspan=5, sticky="ew", padx=5, pady=2)
+
+        # زر الحفظ
+        def _save_extra_abholen():
+            doctor = self.extra_doctor_var.get().strip()
+            time_type = self.extra_time_combo.get()
+            date_str = self.extra_date_picker.get()
+            notes = self.extra_notes_text.get("1.0", "end").strip()
+            time_from = self.extra_time_from.get().strip() if self.extra_time_from.winfo_ismapped() else ""
+            time_to = self.extra_time_to.get().strip() if self.extra_time_to.winfo_ismapped() else ""
+            if time_type == "von - bis":
+                zeit = f"{time_type} {time_from} - {time_to}"
+            elif time_type in ("bis", "ab"):
+                zeit = f"{time_type} {time_from}"
+            else:
+                zeit = time_type
+            if not doctor or not date_str or not zeit:
+                self.show_message("warning", "يرجى إدخال اسم الطبيب والتاريخ والوقت.")
+                return
+            title = f"Extra Abholen: {doctor}"
+            description = f"Zeit: {zeit}\n{notes}".strip()
+            start = end = date_str
+            with sqlite3.connect("medicaltrans.db") as conn:
+                c = conn.cursor()
+                c.execute(
+                    "INSERT INTO calendar_events (title, description, start_date, end_date) VALUES (?, ?, ?, ?)",
+                    (title, description, start, end),
+                )
+                conn.commit()
+            self.show_message("success", f"✅ تم حفظ Extra Abholen للطبيب {doctor}.")
+            self.extra_doctor_var.set("")
+            self.extra_time_combo.set(zeit_options[0])
+            _on_extra_time_change()
+            self.extra_time_from.set("10:00")
+            self.extra_time_to.set("11:00")
+            self.extra_date_picker.set("")
+            self.extra_notes_text.delete("1.0", "end")
+            self._load_calendar_events()
+        extra_save_btn = ttk.Button(
+            extra_abholen_frame, text="💾 حفظ", style="Green.TButton", command=_save_extra_abholen
+        )
+        extra_save_btn.grid(row=3, column=0, columnspan=6, pady=6)
 
         # ===== جدول الأحداث المجدولة =====
         events_frame = tb.LabelFrame(frame, text="الأحداث المجدولة", padding=10)
-        events_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
-
+        events_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
         tree_frame = tb.Frame(events_frame)
         tree_frame.pack(fill="both", expand=True)
-
         columns = ("id", "title", "description", "start", "end")
         self.calendar_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=5)
         self.calendar_tree.column("id", width=0, stretch=False)
         self.calendar_tree.heading("id", text="")
         self.calendar_tree.reload_callback = self._load_calendar_events
-        self._load_calendar_events()  # تحميل البيانات الأصلية
+        self._load_calendar_events()
         self.calendar_tree.pack(side="left", fill="both", expand=True)
-
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.calendar_tree.yview, style="TScrollbar")
         vsb.pack(side="right", fill="y")
         self.calendar_tree.configure(yscrollcommand=vsb.set)
-
         self.configure_tree_columns(self.calendar_tree, ["", "نوع الحدث", "ملاحظات", "من", "إلى"])
-
         bottom_controls = tb.Frame(events_frame)
         bottom_controls.pack(fill="x", pady=(10, 10))
-
         search_frame = tb.Frame(bottom_controls)
         search_frame.pack(side="left", padx=(10, 0), anchor="w")
         self.attach_search_filter(search_frame, self.calendar_tree, query_callback=self._load_calendar_events)
-
-        # تقسيم بصري موحد أسفل الجدول (كما في جدول السائقين)
         center_buttons = tb.Frame(bottom_controls)
         center_buttons.pack(side="left", expand=True)
-
-        # زر الطباعة + المؤرشفة + تعديل
-        ttk.Button(center_buttons, text="🖨️ طباعة", style="info.TButton",
-                   command=lambda: self._print_calendar_table("current")).pack(side="left", padx=10)
-
-        ttk.Button(center_buttons, text="📁 عرض الأحداث المؤرشفة", style="info.TButton",
-                   command=self._toggle_archived_calendar_window).pack(side="left", padx=10)
-
-        ttk.Button(center_buttons, text="🗓️ تعديل العطلة", style="Purple.TButton",
-                   command=self._edit_selected_event).pack(side="left", padx=10)
-
-        # موازن تمركز بصري
+        ttk.Button(
+            center_buttons, text="🖨️ طباعة", style="info.TButton", command=lambda: self._print_calendar_table("current")
+        ).pack(side="left", padx=10)
+        ttk.Button(
+            center_buttons, text="📁 عرض الأحداث المؤرشفة", style="info.TButton", command=self._toggle_archived_calendar_window
+        ).pack(side="left", padx=10)
+        ttk.Button(
+            center_buttons, text="🗓️ تعديل العطلة", style="Purple.TButton", command=self._edit_selected_event
+        ).pack(side="left", padx=10)
         right_spacer = tb.Frame(bottom_controls)
         right_spacer.pack(side="left", expand=True)
 
         # ===== جدول الإجازات المباشر =====
         vac_table_frame = tb.LabelFrame(frame, text="الإجازات الحالية", padding=10)
-        vac_table_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
-        frame.rowconfigure(3, weight=1)  # للسماح بتمدد السطر رقم 3
-
+        vac_table_frame.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
+        frame.rowconfigure(3, weight=1)
         tree_frame = tb.Frame(vac_table_frame)
         tree_frame.grid(row=0, column=0, sticky="nsew")
         vac_table_frame.rowconfigure(0, weight=1)
         vac_table_frame.columnconfigure(0, weight=1)
-
         columns = ("id", "person_type", "name", "start", "end", "notes")
         self.vacation_tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
         self.vacation_tree.column("id", width=0, stretch=False)
@@ -7175,49 +7257,38 @@ class MedicalTransApp(tb.Window):
         self.vacation_tree.grid(row=0, column=0, sticky="nsew")
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
-
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.vacation_tree.yview, style="TScrollbar")
         vsb.grid(row=0, column=1, sticky="ns")
         self.vacation_tree.configure(yscrollcommand=vsb.set)
-
         self.configure_tree_columns(self.vacation_tree, ["", "النوع", "الاسم", "من", "إلى", "ملاحظات"])
-
         self._load_vacations_inline = self._define_vac_load_func()
         self.vacation_tree.reload_callback = self._load_vacations_inline
         self._load_vacations_inline()
-
-        # ✅ تحميل البيانات الأصلية لدعم البحث
         self._load_original_data(
             self.vacation_tree,
             "SELECT id, person_type, name, start_date, end_date, notes FROM vacations WHERE end_date >= date('now') ORDER BY start_date ASC"
         )
-
         bottom_controls = tb.Frame(vac_table_frame)
         bottom_controls.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 10))
-
         search_frame = tb.Frame(bottom_controls)
         search_frame.pack(side="left", padx=(10, 0), anchor="w")
         self.attach_search_filter(search_frame, self.vacation_tree, query_callback=self._load_vacations_inline)
-
         center_buttons = tb.Frame(bottom_controls)
         center_buttons.pack(side="left", expand=True)
-
-        ttk.Button(center_buttons, text="🖨️ طباعة", style="info.TButton",
-                   command=lambda: self._print_vacations_table("current")).pack(side="left", padx=10)
-
-        ttk.Button(center_buttons, text="📁 عرض الإجازات المؤرشفة", style="info.TButton",
-                   command=self._toggle_archived_vacations_window).pack(side="left", padx=10)
-
-        ttk.Button(center_buttons, text="📝 تعديل الإجازة", style="Purple.TButton",
-                   command=self._edit_selected_vacation_inline).pack(side="left", padx=10)
-
+        ttk.Button(
+            center_buttons, text="🖨️ طباعة", style="info.TButton", command=lambda: self._print_vacations_table("current")
+        ).pack(side="left", padx=10)
+        ttk.Button(
+            center_buttons, text="📁 عرض الإجازات المؤرشفة", style="info.TButton", command=self._toggle_archived_vacations_window
+        ).pack(side="left", padx=10)
+        ttk.Button(
+            center_buttons, text="📝 تعديل الإجازة", style="Purple.TButton", command=self._edit_selected_vacation_inline
+        ).pack(side="left", padx=10)
         right_spacer = tb.Frame(bottom_controls)
         right_spacer.pack(side="left", expand=True)
 
         self._load_upcoming_calendar_events()
-
         frame.columnconfigure(0, weight=1)
-
         return frame
 
     def _edit_selected_vacation_inline(self):
