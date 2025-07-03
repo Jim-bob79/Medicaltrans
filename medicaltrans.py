@@ -7075,56 +7075,108 @@ class MedicalTransApp(tb.Window):
         vac_save_btn.grid(row=3, column=0, columnspan=4, pady=6)
 
         # ========== إطار Extra Abholen ==========
-        self._build_extra_abholen_frame(top_row)
         extra_abholen_frame = tb.LabelFrame(top_row, text="Extra Abholen", padding=10)
         extra_abholen_frame.grid(row=0, column=2, sticky="nsew", padx=(5, 0), pady=0)
 
-        # اسم الطبيب: Combobox ببحث ذكي وفتح تلقائي عند الفوكس
-        import sqlite3
+        # اسم الطبيب: Entry + زر سهم + نافذة منبثقة فيها شريط بحث وقائمة
         ttk.Label(extra_abholen_frame, text="اسم الطبيب:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.extra_doctor_var = tk.StringVar()
+
+        doctor_entry_frame = tb.Frame(extra_abholen_frame)
+        doctor_entry_frame.grid(row=0, column=1, columnspan=5, sticky="ew", padx=5, pady=2)
+
+        doctor_entry = ttk.Entry(doctor_entry_frame, textvariable=self.extra_doctor_var, width=26)
+        doctor_entry.pack(side="left", fill="x", expand=True)
+
+        arrow_btn = ttk.Button(doctor_entry_frame, text="▼", width=2)
+        arrow_btn.pack(side="left", padx=(2, 0))
+
+        # --- تحميل أسماء الأطباء ---
+        import sqlite3
         with sqlite3.connect("medicaltrans.db") as conn:
             c = conn.cursor()
-            c.execute("SELECT name FROM doctors WHERE (name IS NOT NULL AND name != '') ORDER BY name ASC")
-            self.extra_all_doctors = [row[0] for row in c.fetchall()]
+            c.execute("SELECT name FROM doctors WHERE name IS NOT NULL AND name != '' ORDER BY name ASC")
+            doctor_names = [row[0] for row in c.fetchall()]
 
-        self.extra_doctor_var = tk.StringVar()
-        self.extra_doctor_entry = ttk.Entry(extra_abholen_frame, textvariable=self.extra_doctor_var, width=26)
-        self.extra_doctor_entry.grid(row=0, column=1, columnspan=5, sticky="ew", padx=5, pady=2)
-        self.extra_doctor_listbox = tk.Listbox(extra_abholen_frame, height=5)
-        self.extra_doctor_listbox.grid_forget()
-
-        def show_doctor_suggestions(event=None):
-            typed = self.extra_doctor_var.get().strip().lower()
-            filtered = [name for name in self.extra_all_doctors if typed in name.lower()] if typed else self.extra_all_doctors
-            if not filtered:
-                self.extra_doctor_listbox.grid_forget()
+        # -- النافذة المنبثقة --
+        def show_doctor_popup(event=None):
+            # إذا كانت النافذة مفتوحة لا تفتح ثانية
+            if hasattr(self, "_extra_doctor_popup") and self._extra_doctor_popup.winfo_exists():
                 return
-            self.extra_doctor_listbox.delete(0, tk.END)
-            for name in filtered:
-                self.extra_doctor_listbox.insert(tk.END, name)
-            row = self.extra_doctor_entry.grid_info()["row"]
-            self.extra_doctor_listbox.grid(row=row+1, column=1, columnspan=5, sticky="ew", padx=5)
-            self.extra_doctor_listbox.lift()
 
-        def hide_doctor_suggestions(event=None):
-            self.after(100, lambda: self.extra_doctor_listbox.grid_forget())
+            popup = tk.Toplevel(self)
+            popup.transient(self.winfo_toplevel())
+            popup.wm_overrideredirect(True)
 
-        def select_doctor_from_listbox(event=None):
-            selection = self.extra_doctor_listbox.curselection()
-            if selection:
-                name = self.extra_doctor_listbox.get(selection[0])
-                self.extra_doctor_var.set(name)
-            self.extra_doctor_listbox.grid_forget()
+            # تموضع النافذة أسفل الحقل مباشرة
+            x = doctor_entry.winfo_rootx()
+            y = doctor_entry.winfo_rooty() + doctor_entry.winfo_height()
+            popup.geometry(f"270x220+{x}+{y}")
 
-        self.extra_doctor_entry.bind("<KeyRelease>", show_doctor_suggestions)
-        self.extra_doctor_entry.bind("<FocusOut>", hide_doctor_suggestions)
-        self.extra_doctor_listbox.bind("<ButtonRelease-1>", select_doctor_from_listbox)
+            self._extra_doctor_popup = popup
+
+            # شريط البحث
+            search_var = tk.StringVar()
+            search_entry = ttk.Entry(popup, textvariable=search_var)
+            search_entry.pack(fill="x", padx=6, pady=(6, 2))
+            search_entry.focus_set()
+
+            # قائمة الأطباء
+            listbox = tk.Listbox(popup, height=8)
+            listbox.pack(fill="both", expand=True, padx=6, pady=2)
+
+            def update_list(*_):
+                val = search_var.get().strip().lower()
+                filtered = [name for name in doctor_names if val in name.lower()] if val else doctor_names
+                listbox.delete(0, "end")
+                for name in filtered:
+                    listbox.insert("end", name)
+                if filtered:
+                    listbox.selection_set(0)
+
+            search_var.trace_add("write", update_list)
+            update_list()
+
+            # عند اختيار اسم
+            def select_doctor(event=None):
+                try:
+                    idx = listbox.curselection()
+                    if not idx:
+                        return
+                    name = listbox.get(idx[0])
+                    self.extra_doctor_var.set(name)
+                    popup.destroy()
+                except Exception:
+                    pass
+
+            # إغلاق عند فقدان التركيز أو الضغط خارج النافذة
+            def close_popup(event=None):
+                if popup.winfo_exists():
+                    popup.destroy()
+
+            listbox.bind("<Double-Button-1>", select_doctor)
+            listbox.bind("<Return>", select_doctor)
+            search_entry.bind("<Down>", lambda e: listbox.focus_set())
+            listbox.bind("<Up>", lambda e: (listbox.focus_set(), listbox.selection_set(max(listbox.curselection()[0]-1, 0))))
+            listbox.bind("<Escape>", close_popup)
+            search_entry.bind("<Escape>", close_popup)
+            popup.bind("<FocusOut>", close_popup)
+            popup.after(100, lambda: popup.focus_force())
+            # عند اختيار بالسهم من الحقل أو زر السهم
+            listbox.bind("<FocusOut>", close_popup)
+
+        # عند التركيز على الحقل أو ضغط السهم أو زر ▼
+        doctor_entry.bind("<Button-1>", show_doctor_popup)
+        arrow_btn.config(command=show_doctor_popup)
+    
+        # عند الضغط Enter داخل الحقل، افتح القائمة إذا لم تفتح
+        doctor_entry.bind("<Down>", show_doctor_popup)
 
         # الوقت + التاريخ في نفس الصف مع تقريب عناصر الوقت
         ttk.Label(extra_abholen_frame, text="Zeit:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         zeit_options = ["bis", "von - bis", "ab", "nach Anruf", "Anschl."]
         self.extra_time_combo = ttk.Combobox(
-        extra_abholen_frame, values=zeit_options, state="readonly", width=8
+            extra_abholen_frame, values=zeit_options, state="readonly", width=8
         )
         self.extra_time_combo.grid(row=1, column=1, sticky="w", padx=(5, 1), pady=2)
         self.extra_time_combo.set(zeit_options[0])
@@ -7241,7 +7293,7 @@ class MedicalTransApp(tb.Window):
         ).pack(side="left", padx=10)
         right_spacer = tb.Frame(bottom_controls)
         right_spacer.pack(side="left", expand=True)
-
+    
         # ===== جدول الإجازات المباشر =====
         vac_table_frame = tb.LabelFrame(frame, text="الإجازات الحالية", padding=10)
         vac_table_frame.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
